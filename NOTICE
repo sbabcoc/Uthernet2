@@ -1,0 +1,49 @@
+NOTICE
+======
+
+Uthernet2 is licensed under the Apache License, Version 2.0 (see
+LICENSE). This file lists third-party materials included in or used to
+build this project.
+
+------------------------------------------------------------------------
+Bundled under the Mozilla Public License 1.1 and a BSD license
+------------------------------------------------------------------------
+
+src/test/resources/ip65test.bin
+
+    A test fixture: this project's own src/test/asm/ip65test.s (Apache
+    License 2.0) linked with the IP65 TCP/IP stack and its Apple II
+    Uthernet II driver.
+
+    IP65
+    The Initial Developer of the Original Code is Jonno Downes.
+    Portions created by the Initial Developer are Copyright (C) 2009
+    Jonno Downes. All Rights Reserved.
+    Licensed under the Mozilla Public License Version 1.1
+    (http://www.mozilla.org/MPL/).
+
+    drivers/w5100.s
+    Copyright (c) 2013, Oliver Schmidt. All rights reserved.
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the conditions in that
+    file's header are met; it is distributed "AS IS", without warranty.
+
+    Source of the Covered Code: https://github.com/cc65/ip65, commit
+    25a9c5aa9480ddab0e506108ec7f1ce538165d28, unmodified.
+    src/test/asm/Makefile rebuilds the fixture from it.
+
+The fixture is used only to verify the card; it is not part of the
+published plug-in jar. That is a good-faith reading of the licenses, not
+a legal conclusion.
+
+------------------------------------------------------------------------
+Consulted, not included
+------------------------------------------------------------------------
+
+The WIZnet W5100 datasheet (version 1.2.4) and the Uthernet II User's and
+Programmer's Manual (a2RetroSystems, 17 Nov 18), including its schematic,
+are the references for the model; see HARDWARE-REFERENCE.md.
+
+AppleWin's Uthernet II implementation (source/Uthernet2.cpp, GPL) was
+read as a cross-check of behavior on points the datasheet doesn't settle,
+each listed in HARDWARE-REFERENCE.md. No code was taken from it.
