@@ -1,5 +1,6 @@
 package com.nordstrom.uthernet.apple;
 
+import com.nordstrom.emulator.expansion.SaturnCard;
 import com.nordstrom.emulator.transfer.HostTransferCard;
 import org.junit.jupiter.api.Test;
 
@@ -72,7 +73,7 @@ class TelnetTest {
                 erase.append("\u001b[21;5H\u001b[1K");              // erase to here: columns 0-4
                 out.write(erase.toString().getBytes(StandardCharsets.US_ASCII));
                 out.write("\u001b[12;1HName: ".getBytes(StandardCharsets.US_ASCII));
-                readUntil(in, bytes('\r', 0));
+                readUntil(in, bytes('\r'));
                 out.write("\r\nBye!\r\n".getBytes(StandardCharsets.US_ASCII));
                 out.flush();
             } catch (IOException e) {
@@ -147,8 +148,8 @@ class TelnetTest {
 
             apple.type("hello\r");
             apple.runUntil(() -> bbs.ended, 20_000, "the BBS to read the name");
-            assertTrue(endsWith(bbs.received(), concat("hello".getBytes(StandardCharsets.US_ASCII), bytes('\r', 0))),
-                "lowercase typed through the shift-key mod, then CR NUL");
+            assertTrue(endsWith(bbs.received(), concat("hello".getBytes(StandardCharsets.US_ASCII), bytes('\r'))),
+                "lowercase typed through the shift-key mod, then CR");
 
             apple.runUntil(() -> apple.screenContains("Connection closed."), 20_000, "the BBS to hang up");
             apple.type("\r");
@@ -209,6 +210,12 @@ class TelnetTest {
             assertTrue(apple.screenContains("line 30") && !apple.screenContains("line 20"), "ESC [ 2 J cleared");
             assertEquals((vt.start() + 23 * 80 + 4) & 0x7FF, vt.cursor(), "the CRTC cursor follows");
 
+            String before = apple.screen();
+            apple.type("\u001b-");                                   // no Saturn: no scrollback
+            apple.runUntil(() -> !apple.keysPending(), 10_000, "the keys to be read");
+            apple.runFor(500);
+            assertEquals(before, apple.screen(), "ESC - changes nothing without a Saturn");
+
             apple.type("\u001bq");
             apple.runUntil(() -> apple.screenContains("Connection closed."), 20_000, "the disconnect");
             apple.type("\r");
@@ -239,6 +246,129 @@ class TelnetTest {
                 assertEquals(expected, apple.hiresByte(row, line, index) & 0x7F,
                     "row " + row + " erased from " + from + ": scan line " + line + ", byte " + index);
             }
+        }
+    }
+
+    @Test
+    void scrollsBackThroughTheSaturn() throws Exception {
+        SaturnCard saturn = new SaturnCard();
+        saturn.configure(new Properties());
+        UpperMemory.fill(saturn);
+        ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+        Thread thread = new Thread(() -> {
+            try (Socket s = server.accept()) {
+                s.setSoTimeout(60_000);
+                OutputStream out = s.getOutputStream();
+                for (int i = 1; i <= 100; i++) {
+                    out.write(("line " + i + "\r\n").getBytes(StandardCharsets.US_ASCII));
+                }
+                out.flush();
+                s.getInputStream().read();                          // the x typed after scrollback
+                out.write("after\r\n".getBytes(StandardCharsets.US_ASCII));
+                out.flush();
+                s.getInputStream().read();
+            } catch (IOException e) {
+                // the test fails on what the Apple saw
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        AppleMachine apple = new AppleMachine(true, "telnet.bin");
+        apple.plugInUpperMemory(saturn);
+        try {
+            apple.runUntil(() -> apple.screenContains("Connect to host"), 30_000, "the host prompt");
+            apple.type("10.0.2.2:" + server.getLocalPort() + "\r");
+            apple.runUntil(() -> apple.row(22).startsWith("line 100"), 30_000, "the lines, and the last line feed");
+            String live = apple.screen();
+            int top = Integer.parseInt(apple.row(0).trim().substring(5));
+
+            apple.type("\u001b-");
+            apple.runUntil(() -> apple.row(23).contains("ESC back --"), 10_000, "the scrollback");
+            assertEquals("line " + (top - 23), apple.row(0).stripTrailing(), "a page back");
+            assertTrue(apple.row(23).contains("  23 lines up"), apple.row(23));
+            apple.type("-");
+            apple.runUntil(() -> apple.row(23).contains("  46 lines up") && apple.row(23).contains("ESC back --"),
+                10_000, "another page back");
+            assertEquals("line " + (top - 46), apple.row(0).stripTrailing());
+            apple.type(" ");
+            apple.runUntil(() -> apple.row(23).contains("  23 lines up") && apple.row(23).contains("ESC back --"),
+                10_000, "a page forward");
+            assertEquals("line " + (top - 23), apple.row(0).stripTrailing());
+            apple.type("\u001b");
+            apple.runUntil(() -> apple.screen().equals(live) && shownOnVideoTerm(apple), 10_000,
+                "the session's screen, as it was, buffer and VideoTerm alike");
+
+            apple.type("x");                                          // the session carries on
+            apple.runUntil(() -> apple.screenContains("after"), 20_000, "more from the BBS");
+
+            apple.type("\u001bq");
+            apple.runUntil(() -> apple.screenContains("Connection closed."), 20_000, "the disconnect");
+            apple.type("\r");
+            apple.runUntil(() -> apple.exited, 10_000, "the program to quit");
+            UpperMemory.assertUntouched(saturn);
+        } finally {
+            apple.close();
+            server.close();
+        }
+    }
+
+    /** @return true if every cell of the VideoTerm shows what the screen buffer holds */
+    private static boolean shownOnVideoTerm(AppleMachine apple) {
+        for (int r = 0; r < 24; r++) {
+            for (int c = 0; c < 80; c++) {
+                if (apple.row(r).charAt(c) != apple.videoTerm.at(r, c)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A BBS that reads a typed line, then a single key for a Y/N question,
+     * as the Norse Wanderer does at sign-up. RETURN used to send CR NUL; this
+     * BBS took the NUL as the answer to the next question: every Y/N
+     * question after a typed line went by with a non-answer.
+     */
+    @Test
+    void returnSendsNothingAfterTheCarriageReturn() throws Exception {
+        ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+        StringBuilder line = new StringBuilder();
+        int[] answer = {-1};
+        Thread thread = new Thread(() -> {
+            try (Socket s = server.accept()) {
+                s.setSoTimeout(20_000);
+                InputStream in = s.getInputStream();
+                OutputStream out = s.getOutputStream();
+                out.write("Handle: ".getBytes(StandardCharsets.US_ASCII));
+                int b;
+                while ((b = in.read()) >= 0 && b != '\r') {
+                    line.append((char) b);
+                }
+                out.write("\r\nAre you new (Y/N)? [Y] ".getBytes(StandardCharsets.US_ASCII));
+                answer[0] = in.read();                              // one key, as the BBS reads it
+                out.write("\r\nOK.\r\n".getBytes(StandardCharsets.US_ASCII));
+                in.read();
+            } catch (IOException e) {
+                // the test fails on what the BBS read
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        AppleMachine apple = new AppleMachine(true, "telnet.bin");
+        try {
+            apple.runUntil(() -> apple.screenContains("Connect to host"), 30_000, "the host prompt");
+            apple.type("10.0.2.2:" + server.getLocalPort() + "\r");
+            apple.runUntil(() -> apple.screenContains("Handle:"), 30_000, "the handle prompt");
+            apple.type("erik\r");
+            apple.runUntil(() -> apple.screenContains("(Y/N)?"), 20_000, "the question");
+            apple.type("n");
+            apple.runUntil(() -> answer[0] != -1, 20_000, "the BBS to read the answer");
+            assertEquals("erik", line.toString());
+            assertEquals('n', answer[0], "the question got the key typed, not what followed RETURN");
+        } finally {
+            apple.close();
+            server.close();
         }
     }
 

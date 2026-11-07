@@ -7,18 +7,23 @@
 ; are ignored; PC graphics characters print as their nearest ASCII.
 ;
 ; Keys: ESC then Q disconnects; ESC then the left or right arrow shows the
-; left or right columns on a Soft-70 screen; ESC ESC sends ESC.
+; left or right columns on a Soft-70 screen; ESC ESC sends ESC. With a
+; Saturn card in slot 0, the last 1,024 lines to scroll off the top are
+; kept there, and ESC then - shows them: - goes back a page, SPACE comes
+; forward, ESC or RETURN returns to the session.
 
 .import sys_start, sys_exit
 .import scr_init, scr_putc, scr_puts, scr_crlf, scr_goto, scr_clear
 .import scr_clear_eol, scr_clear_bol, scr_clear_line, scr_clear_eos, scr_clear_bos
 .import scr_hscroll, scr_reverse_index, scr_row, scr_col, scr_put_dec
-.import scr_batch_begin, scr_batch_end
+.import scr_batch_begin, scr_batch_end, scr_redraw, scroll_hook, scr_put_num4
+.import scr_buf, scr_row_lo, scr_row_hi, beep
+.import sat_detect, sat_ok, sat_seek, sat_put, sat_get
 .import kbd_avail, kbd_get, line_input, net_start
 .import dns_set_hostname, dns_resolve, dns_ip
 .import tcp_connect, tcp_connect_ip, tcp_callback, tcp_send, tcp_send_data_len, tcp_close
 .import tcp_inbound_data_ptr, tcp_inbound_data_length, ip65_process
-.importzp zp_c, zp_t0
+.importzp zp_a, zp_c, zp_t0
 
 IAC  = 255
 DONT = 254
@@ -32,6 +37,8 @@ OPT_SGA   = 3
 OPT_TTYPE = 24
 OPT_NAWS  = 31
 TX_SIZE   = 128
+SB_LINES  = 1024            ; scrollback lines, 80 bytes each, from the Saturn's byte 0
+SNAPSHOT  = SB_LINES * 80   ; the live screen, kept while scrollback is shown
 
 .segment "STARTUP"
         jmp main
@@ -59,6 +66,16 @@ saved_col:  .res 1
 tx_len:     .res 1
 tx_buf:     .res TX_SIZE
 tx_send:    .res TX_SIZE
+; scrollback
+sb_head:    .res 2          ; the slot the next line goes in
+sb_lines:   .res 2          ; lines kept
+sb_up:      .res 2          ; how far back the view is
+sb_base:    .res 2          ; the first line shown, counting from the oldest kept
+sb_index:   .res 2
+sb_row:     .res 1
+sb_saved_row: .res 1
+sb_saved_col: .res 1
+sb_pos:     .res 3
 
 .rodata
 banner:     .byte "Uthernet II Telnet", $0D, $0A, $0A, 0
@@ -70,6 +87,8 @@ msg_noconn: .byte "the connection failed.", 0
 msg_connected: .byte "connected. ESC Q disconnects.", $0D, $0A, 0
 msg_closed: .byte $0D, $0A, "Connection closed.", 0
 msg_anykey: .byte " Press a key.", 0
+msg_sb1:    .byte "-- Scrollback:", 0
+msg_sb2:    .byte " lines up.  - older  SPACE newer  ESC back --", 0
 ttype:      .byte "VT100"
 TTYPE_LEN = * - ttype
 
@@ -78,6 +97,16 @@ TTYPE_LEN = * - ttype
 main:
         jsr sys_start
         jsr scr_init
+        jsr sat_detect
+        lda sat_ok
+        beq :+
+        lda #$4C            ; JMP sb_save: keep lines as they scroll off
+        sta scroll_hook
+        lda #<sb_save
+        sta scroll_hook+1
+        lda #>sb_save
+        sta scroll_hook+2
+:
         lda #<banner
         ldx #>banner
         jsr scr_puts
@@ -220,14 +249,14 @@ parse_port:
 ; keyboard
 
 ; Handles a key; C set if it asks to disconnect.
+; RETURN goes as a bare CR, as a modem delivered it, though the telnet
+; standard asks for CR NUL: BBSes that read one key at a time take the NUL
+; as the next keypress, so a Y/N question right after a typed line got the
+; NUL as its answer.
 key:    ldx escape
         bne @command
         cmp #$1B
         beq @escape
-        cmp #$0D
-        bne @send
-        jsr tx_put
-        lda #0              ; telnet's CR is CR NUL
 @send:  jsr tx_put
         jsr tx_flush
         clc
@@ -242,7 +271,12 @@ key:    ldx escape
         stx escape
         cmp #$1B
         beq @send
-        and #$DF            ; fold case
+        cmp #'-'
+        bne :+
+        jsr scrollback
+        clc
+        rts
+:       and #$DF            ; fold case
         cmp #'Q'
         beq @quit
         cmp #$08
@@ -766,3 +800,297 @@ tx_dec: ldx #0
 :       pla
         ora #'0'
         jmp tx_put
+
+; ---------------------------------------------------------------------
+; scrollback, in the Saturn
+
+; The scroll hook: keeps row 0, about to scroll off, in slot sb_head.
+sb_save:
+        lda sb_head
+        ldx sb_head+1
+        jsr seek_line
+        lda #0
+        sta sb_index
+:       ldx sb_index
+        lda scr_buf,x
+        jsr sat_put
+        inc sb_index
+        lda sb_index
+        cmp #80
+        bne :-
+        inc sb_head         ; the next slot, round the ring
+        bne :+
+        inc sb_head+1
+:       lda sb_head+1
+        and #>(SB_LINES-1)
+        sta sb_head+1
+        lda sb_lines+1      ; one more line kept, up to SB_LINES
+        cmp #>SB_LINES
+        bcs :+
+        inc sb_lines
+        bne :+
+        inc sb_lines+1
+:       rts
+
+; Moves to scrollback slot AX: byte AX * 80.
+seek_line:
+        sta sb_pos          ; * 16
+        stx sb_pos+1
+        ldx #4
+:       asl sb_pos
+        rol sb_pos+1
+        dex
+        bne :-
+        lda sb_pos          ; + * 64 (that * 4)
+        sta sb_index
+        lda sb_pos+1
+        sta sb_index+1
+        lda #0
+        sta sb_pos+2
+        ldx #2
+:       asl sb_index
+        rol sb_index+1
+        rol sb_pos+2
+        dex
+        bne :-
+        clc
+        lda sb_pos
+        adc sb_index
+        pha
+        lda sb_pos+1
+        adc sb_index+1
+        tax
+        lda sb_pos+2
+        adc #0
+        tay
+        pla
+        jmp sat_seek
+
+; Moves to row A of the saved live screen.
+seek_snapshot_row:
+        tax                 ; row * 80 = row * 64 + row * 16
+        lda #0
+        sta sb_pos+1
+        txa
+        ldx #4
+:       asl
+        rol sb_pos+1
+        dex
+        bne :-
+        sta sb_pos
+        ldx sb_pos+1
+        stx sb_index+1
+        ldx #2
+:       asl
+        rol sb_index+1
+        dex
+        bne :-
+        clc
+        adc sb_pos
+        pha
+        lda sb_index+1
+        adc sb_pos+1
+        adc #>SNAPSHOT
+        tax
+        pla
+        ldy #^SNAPSHOT
+        jmp sat_seek
+
+; ESC -: shows the scrollback, a page at a time, then puts the session's
+; screen back as it was. Nothing is read from the network meanwhile.
+scrollback:
+        lda sat_ok
+        beq @none
+        lda sb_lines
+        ora sb_lines+1
+        bne :+
+@none:  jmp beep
+:       lda scr_row
+        sta sb_saved_row
+        lda scr_col
+        sta sb_saved_col
+        lda #0              ; keep the live screen
+        jsr seek_snapshot_row
+        jsr snapshot_copy_out
+        lda #0
+        sta sb_up+1
+        lda #23
+        sta sb_up
+        jsr clamp_up
+@show:  jsr sb_render
+@key:   jsr kbd_get
+        cmp #'-'
+        beq @older
+        cmp #' '
+        beq @newer
+        cmp #$1B
+        beq @live
+        cmp #$0D
+        beq @live
+        jmp @key
+@older: clc
+        lda sb_up
+        adc #23
+        sta sb_up
+        bcc :+
+        inc sb_up+1
+:       jsr clamp_up
+        jmp @show
+@newer: lda sb_up+1
+        bne :+
+        lda sb_up
+        cmp #24
+        bcc @live
+:       sec
+        lda sb_up
+        sbc #23
+        sta sb_up
+        bcs :+
+        dec sb_up+1
+:       jmp @show
+@live:  lda #0
+        jsr seek_snapshot_row
+        jsr snapshot_copy_in
+        jsr scr_redraw
+        ldx sb_saved_row
+        ldy sb_saved_col
+        jmp scr_goto
+
+; sb_up = min(sb_up, sb_lines)
+clamp_up:
+        lda sb_lines
+        cmp sb_up
+        lda sb_lines+1
+        sbc sb_up+1
+        bcs :+
+        lda sb_lines
+        sta sb_up
+        lda sb_lines+1
+        sta sb_up+1
+:       rts
+
+; Copies the whole screen buffer to, or from, the Saturn at the current byte.
+snapshot_copy_out:
+        jsr snapshot_start
+:       ldy #0
+        lda (zp_a),y
+        jsr sat_put
+        jsr snapshot_next
+        bne :-
+        rts
+
+snapshot_copy_in:
+        jsr snapshot_start
+:       jsr sat_get
+        ldy #0
+        sta (zp_a),y
+        jsr snapshot_next
+        bne :-
+        rts
+
+snapshot_start:
+        lda #<scr_buf
+        sta zp_a
+        lda #>scr_buf
+        sta zp_a+1
+        lda #<(80*24)
+        sta sb_index
+        lda #>(80*24)
+        sta sb_index+1
+        rts
+
+; Next byte; Z set when the 1,920 are done.
+snapshot_next:
+        inc zp_a
+        bne :+
+        inc zp_a+1
+:       lda sb_index
+        bne :+
+        dec sb_index+1
+:       dec sb_index
+        lda sb_index
+        ora sb_index+1
+        rts
+
+; Fills the screen with the lines sb_up back from the live screen's top:
+; older ones from the scrollback, the rest from the saved live screen.
+sb_render:
+        sec                 ; sb_base: the first line shown, as a count from the oldest
+        lda sb_lines
+        sbc sb_up
+        sta sb_base
+        lda sb_lines+1
+        sbc sb_up+1
+        sta sb_base+1
+        lda #0
+        sta sb_row
+@row:   clc                 ; this row's line: sb_base + row
+        lda sb_base
+        adc sb_row
+        sta sb_index
+        lda sb_base+1
+        adc #0
+        sta sb_index+1
+        lda sb_index        ; in the scrollback, or the live screen?
+        cmp sb_lines
+        lda sb_index+1
+        sbc sb_lines+1
+        bcs @live
+        sec                 ; slot = (head - count + line) mod SB_LINES
+        lda sb_head
+        sbc sb_lines
+        tax
+        lda sb_head+1
+        sbc sb_lines+1
+        tay
+        txa
+        clc
+        adc sb_index
+        tax
+        tya
+        adc sb_index+1
+        and #>(SB_LINES-1)
+        tay
+        txa
+        pha
+        tya
+        tax
+        pla
+        jsr seek_line
+        jmp @copy
+@live:  sec                 ; live row = line - count
+        lda sb_index
+        sbc sb_lines
+        jsr seek_snapshot_row
+@copy:  ldx sb_row
+        lda scr_row_lo,x
+        sta zp_a
+        lda scr_row_hi,x
+        sta zp_a+1
+        lda #0
+        sta sb_index
+:       jsr sat_get
+        ldy sb_index
+        sta (zp_a),y
+        inc sb_index
+        lda sb_index
+        cmp #80
+        bne :-
+        inc sb_row
+        lda sb_row
+        cmp #24
+        bne @row
+        jsr scr_redraw
+        ldx #23             ; the status, over the bottom line
+        ldy #0
+        jsr scr_goto
+        jsr scr_clear_eol
+        lda #<msg_sb1
+        ldx #>msg_sb1
+        jsr scr_puts
+        lda sb_up
+        ldx sb_up+1
+        jsr scr_put_num4
+        lda #<msg_sb2
+        ldx #>msg_sb2
+        jmp scr_puts

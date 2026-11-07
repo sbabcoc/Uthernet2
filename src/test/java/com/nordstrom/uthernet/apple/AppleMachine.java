@@ -16,7 +16,9 @@ import java.util.function.BooleanSupplier;
  * Just enough Apple II+ to run the utilities in src/apple on
  * ReplicApple2Plus's 6502: 48K of RAM, the keyboard with the shift-key mod
  * on pushbutton 2, the display soft switches, the Uthernet II in slot 1,
- * optionally a {@link VideoTermDouble} in slot 3, and a stand-in ROM that
+ * optionally a {@link VideoTermDouble} in slot 3, optionally a card in slot 0
+ * that bank-switches $D000-$FFFF (a Saturn or Language Card), and a
+ * stand-in ROM that
  * is all RTS except the Monitor's WAIT, which IP65's timer calls. A
  * program leaving through the BASIC warm-start vector at $3D0 stops it.
  * It runs paced to the 6502's real speed, so IP65's timeouts mean what
@@ -37,6 +39,8 @@ final class AppleMachine implements MemoryBus {
     final Uthernet2 card = new Uthernet2();
     final VideoTermDouble videoTerm;
     private final SlotCard[] otherCards = new SlotCard[8];
+    /** The card in slot 0 that bank-switches $D000-$FFFF, or null. */
+    private SlotCard upperMemory;
     private final Deque<int[]> keys = new ArrayDeque<>();
     private int keyLatch;
     private boolean shiftHeld;
@@ -66,6 +70,12 @@ final class AppleMachine implements MemoryBus {
     /** Puts another card's I/O switches in a slot (its ROM isn't mapped). */
     void plugIn(int slot, SlotCard other) {
         otherCards[slot] = other;
+    }
+
+    /** Puts a card that bank-switches $D000-$FFFF in slot 0, as the Saturn or Language Card goes. */
+    void plugInUpperMemory(SlotCard card) {
+        upperMemory = card;
+        otherCards[0] = card;
     }
 
     /** Releases the card's host sockets. */
@@ -115,6 +125,17 @@ final class AppleMachine implements MemoryBus {
             }
         }
         totalCycles += cycles;
+    }
+
+    /** Runs for about {@code millis} of the Apple's time, whatever happens. */
+    void runFor(long millis) throws InterruptedException {
+        long until = System.nanoTime() + millis * 1_000_000;
+        runUntil(() -> System.nanoTime() >= until, millis + 10_000, "time to pass");
+    }
+
+    /** @return true while typed keys are still waiting to be read */
+    boolean keysPending() {
+        return !keys.isEmpty() || (keyLatch & 0x80) != 0;
     }
 
     private Cpu6502 cpu;
@@ -191,6 +212,12 @@ final class AppleMachine implements MemoryBus {
         if (address < 0xD000) {
             return videoTerm == null ? 0 : videoTerm.readSlotSpace(address);
         }
+        if (upperMemory != null) {
+            java.util.OptionalInt ram = upperMemory.readUpperMemory(address - 0xD000);
+            if (ram.isPresent()) {
+                return ram.getAsInt();
+            }
+        }
         if (address >= 0xFCA8 && address < 0xFCA8 + WAIT.length) {
             return WAIT[address - 0xFCA8];
         }
@@ -209,8 +236,12 @@ final class AppleMachine implements MemoryBus {
             ram[address] = value & 0xFF;
         } else if (address < 0xC100) {
             writeIo(address, value);
-        } else if (address < 0xD000 && videoTerm != null) {
-            videoTerm.writeSlotSpace(address, value);
+        } else if (address < 0xD000) {
+            if (videoTerm != null) {
+                videoTerm.writeSlotSpace(address, value);
+            }
+        } else if (upperMemory != null) {
+            upperMemory.writeUpperMemory(address - 0xD000, value);
         }
     }
 

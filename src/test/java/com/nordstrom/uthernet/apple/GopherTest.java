@@ -1,5 +1,7 @@
 package com.nordstrom.uthernet.apple;
 
+import com.nordstrom.emulator.expansion.LanguageCard;
+import com.nordstrom.emulator.expansion.SaturnCard;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,7 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -104,6 +107,19 @@ class GopherTest {
             }
             return text.append(".\r\n").toString();
         }
+        if (selector.equals("/big")) {                          // ~60K: a directory-style menu
+            StringBuilder menu = new StringBuilder();
+            for (int i = 1; i <= 1200; i++) {
+                if (i % 10 == 1) {
+                    menu.append("iSection ").append(i / 10 + 1).append("\t\terror.host\t1\r\n");
+                }
+                menu.append("0Entry ").append(i).append(" of the big menu\t/entry/").append(i).append(here);
+            }
+            return menu.append(".\r\n").toString();
+        }
+        if (selector.startsWith("/entry/")) {
+            return "This is entry " + selector.substring(7) + ".\r\n.\r\n";
+        }
         if (selector.equals("/long.txt")) {
             StringBuilder text = new StringBuilder();
             for (int i = 1; i <= 1000; i++) {
@@ -125,10 +141,10 @@ class GopherTest {
             apple.runUntil(() -> apple.screenContains("Go to host"), 30_000, "the go-to prompt");
             apple.type("10.0.2.2:" + server.getLocalPort() + "\r");
             apple.runUntil(() -> status(apple, "Item _"), 30_000, "the menu");
-            assertEquals("    Welcome to the test Gopher", apple.row(0).stripTrailing(), "an info line, unnumbered");
-            assertEquals("  1 About this server", apple.row(1).stripTrailing());
-            assertEquals("  2 A submenu", apple.row(2).stripTrailing());
-            assertEquals("  3 Search the server", apple.row(3).stripTrailing());
+            assertEquals("     Welcome to the test Gopher", apple.row(0).stripTrailing(), "an info line, unnumbered");
+            assertEquals("   1 About this server", apple.row(1).stripTrailing());
+            assertEquals("   2 A submenu", apple.row(2).stripTrailing());
+            assertEquals("   3 Search the server", apple.row(3).stripTrailing());
             assertTrue(status(apple, "Item _"), apple.screen());
 
             apple.type("1\r");
@@ -160,6 +176,157 @@ class GopherTest {
             apple.type("q");
             apple.runUntil(() -> apple.exited, 10_000, "the program to quit");
             assertTrue(apple.text, "back to the text screen");
+        } finally {
+            apple.close();
+        }
+    }
+
+    @Test
+    void streamsAMenuFarLargerThanItsBuffer() throws Exception {
+        AppleMachine apple = new AppleMachine(false, "gopher.bin");   // Soft-70: the smallest page store
+        try {
+            apple.runUntil(() -> apple.screenContains("Go to host"), 30_000, "the go-to prompt");
+            apple.type("10.0.2.2:" + server.getLocalPort() + "/1/big\r");
+            apple.runUntil(() -> status(apple, "Item _ Page 1"), 30_000, "page 1");
+            assertEquals("     Section 1", apple.row(0).stripTrailing());
+            assertEquals("   1 Entry 1 of the big menu", apple.row(1).stripTrailing());
+            int first = itemOnRow(apple, 1);
+            assertEquals(1, first);
+
+            for (int page = 2; page <= 40; page++) {
+                int p = page;
+                apple.type(" ");
+                apple.runUntil(() -> status(apple, "Item _ Page " + p), 20_000, "page " + p);
+            }
+            int item = firstItem(apple);
+            assertTrue(item > 255, "numbering carries past 255: " + item + "\n" + apple.screen());
+            String entry = apple.row(rowOfItem(apple, item)).trim();
+            assertEquals(item + " Entry " + item + " of the big menu", entry, "number and entry agree");
+
+            apple.type("-");                                          // fetched again, counted to page 39
+            apple.runUntil(() -> status(apple, "Item _ Page 39"), 30_000, "page 39");
+            int back = firstItem(apple);
+            assertTrue(back < item, "page 39 comes before page 40");
+            assertEquals(back + " Entry " + back + " of the big menu", apple.row(rowOfItem(apple, back)).trim());
+
+            apple.type("9999\r");                                     // not on this page: nothing happens
+            apple.runUntil(() -> status(apple, "Item _ Page 39"), 10_000, "the page again");
+
+            apple.type(back + "\r");
+            apple.runUntil(() -> status(apple, "Page 1") && apple.row(0).startsWith("This is entry"),
+                20_000, "the entry");
+            assertEquals("This is entry " + back + ".", apple.row(0).stripTrailing());
+            apple.type("\u001b");                                    // back to the page it was opened from
+            apple.runUntil(() -> status(apple, "Item _ Page 39"), 30_000, "back to page 39");
+            assertEquals(back, firstItem(apple));
+        } finally {
+            apple.close();
+        }
+    }
+
+    /** @return the item number printed at the start of {@code row}, or 0 for an info line */
+    private static int itemOnRow(AppleMachine apple, int row) {
+        String number = apple.row(row).substring(0, 4).trim();
+        return number.isEmpty() ? 0 : Integer.parseInt(number);
+    }
+
+    private static int firstItem(AppleMachine apple) {
+        for (int r = 0; r < 22; r++) {
+            if (itemOnRow(apple, r) != 0) {
+                return itemOnRow(apple, r);
+            }
+        }
+        throw new AssertionError("no items on the page\n" + apple.screen());
+    }
+
+    private static int rowOfItem(AppleMachine apple, int item) {
+        for (int r = 0; r < 22; r++) {
+            if (itemOnRow(apple, r) == item) {
+                return r;
+            }
+        }
+        throw new AssertionError("item " + item + " isn't on the page\n" + apple.screen());
+    }
+
+    @Test
+    void pagesBackFromTheSaturnWithoutFetchingAgain() throws Exception {
+        SaturnCard saturn = new SaturnCard();
+        saturn.configure(new Properties());
+        UpperMemory.fill(saturn);
+        AppleMachine apple = new AppleMachine(false, "gopher.bin");
+        apple.plugInUpperMemory(saturn);
+        try {
+            apple.runUntil(() -> apple.screenContains("Go to host"), 30_000, "the go-to prompt");
+            apple.type("10.0.2.2:" + server.getLocalPort() + "/0/long.txt\r");
+            apple.runUntil(() -> status(apple, "Page 1"), 30_000, "page 1");
+            for (int page = 2; page <= 5; page++) {
+                int p = page;
+                apple.type(" ");
+                apple.runUntil(() -> status(apple, "Page " + p), 10_000, "page " + p);
+            }
+            int requests = selectors.size();
+            apple.type("-");
+            apple.runUntil(() -> status(apple, "Page 4"), 10_000, "page 4");
+            assertEquals("Long line 70", apple.row(0).stripTrailing(), "page 4 again");
+            assertEquals("Long line 92", apple.row(22).stripTrailing());
+            apple.type("-");
+            apple.runUntil(() -> status(apple, "Page 3"), 10_000, "page 3");
+            assertEquals("Long line 47", apple.row(0).stripTrailing());
+            for (int page = 4; page <= 7; page++) {                   // back over what's kept, then on past it
+                int p = page;
+                apple.type(" ");
+                apple.runUntil(() -> status(apple, "Page " + p), 10_000, "page " + p);
+            }
+            assertEquals("Long line 139", apple.row(0).stripTrailing(), "page 7, read on from the server");
+            assertEquals(requests, selectors.size(), "nothing fetched again");
+
+            apple.type("g10.0.2.2:" + server.getLocalPort() + "/1/big\r");   // and a menu
+            apple.runUntil(() -> status(apple, "Item _ Page 1"), 30_000, "the big menu");
+            for (int page = 2; page <= 12; page++) {
+                int p = page;
+                apple.type(" ");
+                apple.runUntil(() -> status(apple, "Item _ Page " + p), 20_000, "page " + p);
+            }
+            int last = firstItem(apple);
+            requests = selectors.size();
+            apple.type("-");
+            apple.runUntil(() -> status(apple, "Item _ Page 11"), 10_000, "page 11");
+            int back = firstItem(apple);
+            assertTrue(back < last);
+            assertEquals(back + " Entry " + back + " of the big menu", apple.row(rowOfItem(apple, back)).trim());
+            apple.type(" ");
+            apple.runUntil(() -> status(apple, "Item _ Page 12"), 10_000, "page 12 again");
+            assertEquals(last, firstItem(apple), "numbering picks up where it was");
+            assertEquals(requests, selectors.size(), "nothing fetched again");
+
+            apple.type("q");
+            apple.runUntil(() -> apple.exited, 10_000, "the program to quit");
+            UpperMemory.assertUntouched(saturn);
+        } finally {
+            apple.close();
+        }
+    }
+
+    @Test
+    void leavesALanguageCardAlone() throws Exception {
+        LanguageCard languageCard = new LanguageCard();
+        languageCard.configure(new Properties());
+        UpperMemory.fill(languageCard);
+        AppleMachine apple = new AppleMachine(false, "gopher.bin");
+        apple.plugInUpperMemory(languageCard);
+        try {
+            apple.runUntil(() -> apple.screenContains("Go to host"), 30_000, "the go-to prompt");
+            apple.type("10.0.2.2:" + server.getLocalPort() + "/0/long.txt\r");
+            apple.runUntil(() -> status(apple, "Page 1"), 30_000, "page 1");
+            apple.type(" ");
+            apple.runUntil(() -> status(apple, "Page 2"), 10_000, "page 2");
+            int requests = selectors.size();
+            apple.type("-");
+            apple.runUntil(() -> status(apple, "Page 1"), 30_000, "page 1 again");
+            assertEquals(requests + 1, selectors.size(), "no Saturn: fetched again");
+            apple.type("q");
+            apple.runUntil(() -> apple.exited, 10_000, "the program to quit");
+            UpperMemory.assertUntouched(languageCard);
         } finally {
             apple.close();
         }

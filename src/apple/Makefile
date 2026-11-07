@@ -18,7 +18,7 @@ AC   ?= AppleCommander-ac.jar
 OUT  = disks
 TEST = ../test/resources
 
-COMMON = zp.o system.o screen.o vterm.o soft70.o tables.o kbd.o lineedit.o netinit.o
+COMMON = zp.o system.o screen.o vterm.o soft70.o tables.o kbd.o lineedit.o netinit.o saturn.o
 LIBS   = $(IP65)/ip65/ip65_tcp.lib $(IP65)/drivers/a2uther2.lib
 
 all: $(OUT)/uthernet2-dos33.dsk $(OUT)/uthernet2-prodos.po $(TEST)/telnet.bin $(TEST)/gopher.bin

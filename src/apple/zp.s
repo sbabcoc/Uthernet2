@@ -6,7 +6,7 @@
 .exportzp ptr1, ptr2, ptr3, ptr4, tmp1, tmp2, tmp3, tmp4, sreg
 .exportzp zp_a, zp_b, zp_c, zp_t0, zp_t1, zp_t2, zp_t3
 .exportzp zp_d, zp_e, zp_f, zp_u0, zp_u1, zp_u2
-.exportzp zp_sa, zp_sb, zp_sc, zp_s0, zp_s1, zp_s2
+.exportzp zp_sa, zp_sb, zp_sc, zp_s0, zp_s1, zp_s2, zp_sat
 .exportzp drv_init_vec, drv_exit_vec, drv_put_vec, drv_clear_row_vec
 .exportzp drv_scroll_vec, drv_cursor_vec, drv_hscroll_vec, drv_clear_span_vec
 
@@ -39,6 +39,7 @@ zp_sc:  .res 2
 zp_s0:  .res 1
 zp_s1:  .res 1
 zp_s2:  .res 1
+zp_sat: .res 2              ; saturn.s's pointer into the card's RAM
 ; the screen driver's entry points, called through JMP (vector)
 drv_init_vec:       .res 2
 drv_exit_vec:       .res 2

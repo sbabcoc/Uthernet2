@@ -12,6 +12,7 @@
 .export scr_clear_eos, scr_clear_bos, scr_hscroll, scr_reverse_index
 .export scr_row, scr_col, scr_buf, scr_row_lo, scr_row_hi, scr_driver
 .export scr_put_dec, scr_put_ip, scr_batch_begin, scr_batch_end
+.export scr_redraw, scroll_hook, scr_put_num4
 
 .import vt_present, vt_init, vt_exit, vt_put, vt_clear_row, vt_scroll, vt_cursor, vt_hscroll, vt_clear_span
 .import s70_init, s70_exit, s70_put, s70_clear_row, s70_scroll, s70_cursor, s70_hscroll, s70_clear_span
@@ -35,6 +36,13 @@ cursor_drawn: .res 1
 batch:       .res 1         ; nonzero between scr_batch_begin and scr_batch_end
 drawn_row:   .res 1
 drawn_col:   .res 1
+
+.data
+; Called with the top line still in row 0, just before it scrolls off.
+; An RTS until a program patches in a JMP (TELNET does, for scrollback).
+scroll_hook:
+        rts
+        .word 0
 
 .rodata
 scr_row_lo:
@@ -222,6 +230,7 @@ line_feed:
         rts
 
 scroll_up:
+        jsr scroll_hook
         lda #<scr_buf
         sta zp_sa
         lda #>scr_buf
@@ -278,6 +287,12 @@ scr_reverse_index:
         bne @row
         ldx #0
         jsr blank_buffer_row
+        jsr redraw_all
+        jmp cursor_show
+
+; Draws the whole buffer again, cursor and all.
+scr_redraw:
+        jsr cursor_hide
         jsr redraw_all
         jmp cursor_show
 
@@ -520,3 +535,49 @@ scr_put_ip:
         iny
         bne @byte
 @done:  rts
+
+; Prints AX (up to 9999) right-aligned in four columns.
+scr_put_num4:
+        sta zp_s0
+        stx zp_s1
+        lda #0
+        sta zp_s2           ; nonzero once a digit has printed
+        ldx #3
+@digit: ldy #0              ; this digit: how many times its power fits
+@sub:   lda zp_s0
+        sec
+        sbc powers4_lo,x
+        pha
+        lda zp_s1
+        sbc powers4_hi,x
+        bcc @less
+        sta zp_s1
+        pla
+        sta zp_s0
+        iny
+        bne @sub
+@less:  pla
+        tya
+        bne :+
+        lda zp_s2
+        bne :+
+        cpx #0
+        beq :+
+        lda #' '            ; a leading zero: blank
+        bne @put
+:       inc zp_s2
+        tya
+        ora #'0'
+@put:   pha
+        txa
+        tay
+        pla
+        sty zp_sb           ; the digit's power, kept across scr_putc
+        jsr scr_putc
+        ldx zp_sb
+        dex
+        bpl @digit
+        rts
+
+powers4_lo: .byte <1, <10, <100, <1000
+powers4_hi: .byte >1, >10, >100, >1000

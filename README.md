@@ -54,17 +54,23 @@ them onto your boot disk.
   (terminal type VT100, window size 80x24) and shows its ANSI screens --
   cursor movement, erasing, and the cursor position report BBSes use to
   detect ANSI. Colors are ignored, and PC box-drawing characters show as
-  `+`, `-` and `|`. ESC then Q disconnects; ESC ESC sends ESC.
-- **GOPHER** browses Gopher servers: numbered menus (type a number, then
-  RETURN), paged text (SPACE and -), searches, ESC to go back, G to go
-  somewhere else (`host[:port]` or a `gopher://` URL), Q to quit. Text,
-  menu and search items open; other types are listed only. Text streams a
-  page at a time, so a document of any length can be read; paging back
-  fetches it again and skips ahead. A menu is held whole, so one larger
-  than free memory -- 8K with a VideoTerm, about 4K without -- is cut off.
+  `+`, `-` and `|`. ESC then Q disconnects; ESC ESC sends ESC. With a
+  Saturn card, ESC then `-` shows the last 1,024 lines to scroll off the
+  top: `-` goes back a page, SPACE forward, ESC returns to the session.
+- **GOPHER** browses Gopher servers: numbered menus (type the number of an
+  item on the page shown, then RETURN), paging with SPACE and -, searches,
+  ESC to go back, G to go somewhere else (`host[:port]` or a `gopher://`
+  URL), Q to quit. Text, menu and search items open; other types are
+  listed only. Menus and text both stream a page at a time, so any size
+  can be read. Paging back redraws from a Saturn card when there is one
+  (up to 84K of each document is kept there), and otherwise fetches it
+  again and skips ahead.
 
 Both find the card in any slot, by the probe in the Uthernet II manual,
-and get an address over DHCP. Both draw an 80-column screen: on the
+and get an address over DHCP. Both look for a Saturn 128K card in slot 0,
+in place of the Language Card (`type=saturn128` in `[0]`), and use its
+banks 2-8; bank 1 is the Language Card memory ProDOS or DOS 3.3 uses,
+and is left alone. Without one they work as before. Both draw an 80-column screen: on the
 VideoTerm when slot 3 holds one (firmware 2.4 requires slot 3, so the
 Uthernet II then goes elsewhere), otherwise as "Soft-70" text on the
 Hi-Res screen, which shows 70 of the 80 columns at a time; the left and
