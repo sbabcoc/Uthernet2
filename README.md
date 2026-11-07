@@ -41,6 +41,37 @@ How the guest reaches the network depends on the socket mode it uses:
 - **IPRAW mode** sends IP packets onto the same LAN; only ICMP echo to the
   gateway's own addresses gets an answer.
 
+## The utility disks
+
+Two programs for the Apple II+ that use the card, on two 140K disk images
+in `src/apple/disks/`: `uthernet2-dos33.dsk` for DOS 3.3 and
+`uthernet2-prodos.po` for ProDOS. Neither image carries an operating
+system: boot your own DOS 3.3 or ProDOS disk, then `BRUN TELNET` or
+`BRUN GOPHER` from the utility disk (ProDOS needs BASIC.SYSTEM), or copy
+them onto your boot disk.
+
+- **TELNET** connects to telnet BBSes. It answers a BBS's telnet options
+  (terminal type VT100, window size 80x24) and shows its ANSI screens --
+  cursor movement, erasing, and the cursor position report BBSes use to
+  detect ANSI. Colors are ignored, and PC box-drawing characters show as
+  `+`, `-` and `|`. ESC then Q disconnects; ESC ESC sends ESC.
+- **GOPHER** browses Gopher servers: numbered menus (type a number, then
+  RETURN), paged text (SPACE and -), searches, ESC to go back, G to go
+  somewhere else (`host[:port]` or a `gopher://` URL), Q to quit. Text,
+  menu and search items open; other types are listed only. Text streams a
+  page at a time, so a document of any length can be read; paging back
+  fetches it again and skips ahead. A menu is held whole, so one larger
+  than free memory -- 8K with a VideoTerm, about 4K without -- is cut off.
+
+Both find the card in any slot, by the probe in the Uthernet II manual,
+and get an address over DHCP. Both draw an 80-column screen: on the
+VideoTerm when slot 3 holds one (firmware 2.4 requires slot 3, so the
+Uthernet II then goes elsewhere), otherwise as "Soft-70" text on the
+Hi-Res screen, which shows 70 of the 80 columns at a time; the left and
+right arrows switch halves (in TELNET, after ESC). With the shift-key mod on pushbutton
+2, letters typed without Shift are lowercase. The II+ keyboard can't type
+`[ \ _ { } | ~` or the backquote.
+
 ## Installing
 
 The card is a plug-in jar, `Uthernet2-<version>.jar`, from this project's
@@ -57,6 +88,7 @@ looks for it in slot 3 by default.
 | `com.nordstrom.uthernet.w5100` | The W5100: registers, indirect bus interface, sockets. No Apple II or host dependencies |
 | `com.nordstrom.uthernet.net` | The virtual network: host sockets, the gateway, DHCP and DNS |
 | `com.nordstrom.uthernet.slot` | The ReplicApple2Plus plug-in card |
+| `src/apple` | The utilities' 6502 source, their Makefile, and the disk images |
 
 ## Building
 
@@ -64,6 +96,10 @@ ReplicApple2Plus must be in the local Maven repository (`./gradlew install`
 in that project), at the version named in `gradle.properties`.
 
     ./gradlew build
+
+The utilities and their disk images are checked in, so that needs nothing
+else. Rebuilding them takes cc65, an IP65 checkout and AppleCommander; see
+`src/apple/Makefile`.
 
 ## Verification
 
@@ -77,6 +113,12 @@ in that project), at the version named in `gradle.properties`.
 - `Uthernet2Test` drives the card through its I/O switches: the manual's
   own installation test and slot probe, /IRQ and RESET, and sockets in
   TCP and UDP mode reaching real host servers, including LISTEN.
+- `TelnetTest` and `GopherTest` run the utilities' own binaries on the
+  6502, against a scripted BBS and a Gopher server on the host's loopback:
+  telnet negotiation, the ANSI screen, the cursor report, lowercase input,
+  menus, paging, search, and both screens. The VideoTerm side runs against
+  `VideoTermDouble`, a stand-in written from ReplicApple2Plus's hardware
+  reference, since the real card model needs Videx's ROMs.
 - `Ip65Test` runs IP65's own Uthernet II driver and TCP/IP stack on
   ReplicApple2Plus's 6502, paced to real time: it leases an address,
   looks up `localhost`, and echoes a line over TCP. The 6502 program is

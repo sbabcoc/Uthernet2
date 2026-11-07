@@ -42,7 +42,11 @@ Before tagging, verify:
    `Ip65Test` and the gateway and card tests open sockets on the loopback
    interface, and the name lookup test asks the host's resolver for
    `localhost`.
-4. README.md and HARDWARE-REFERENCE.md are up to date.
+4. If anything in `src/apple` changed, the utilities are rebuilt and their
+   outputs committed (`make` there; see its header for what it needs):
+   both disk images in `src/apple/disks/` and the two programs it copies
+   to `src/test/resources/`.
+5. README.md and HARDWARE-REFERENCE.md are up to date.
 
 > **IMPORTANT**: Do a full build verification BEFORE tagging. If a bug is
 > found after tagging, the tag must be deleted locally and remotely, the
@@ -85,10 +89,12 @@ staging repository is released.
 
 ### 4. Create the GitHub release
 
-The plug-in jar is what users install, so attach it:
+The plug-in jar is what users install, and the two utility disks are
+what they run on it, so attach all three:
 
 ```bash
 gh release create v1.0.0 build/libs/Uthernet2-1.0.0.jar \
+    src/apple/disks/uthernet2-dos33.dsk src/apple/disks/uthernet2-prodos.po \
     --title "Uthernet2 1.0.0" --notes "..."
 ```
 

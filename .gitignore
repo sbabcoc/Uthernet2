@@ -7,6 +7,13 @@ build/
 
 *.dsk
 *.DSK
+# ...except the utility disks this project publishes
+!src/apple/disks/*.dsk
+
+# Apple II utility build outputs (the programs the tests run are copied to src/test/resources)
+src/apple/*.o
+src/apple/*.map
+src/apple/*.bin
 
 # Gradle wrapper local config (keep the wrapper jar/properties, ignore local overrides)
 gradle.properties.local
