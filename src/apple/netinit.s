@@ -2,14 +2,23 @@
 ; address, then ready for DNS and TCP.
 ;
 ; The card has no ROM, so it's found by how it behaves, as the Uthernet II
-; manual's probe does (p. 38): writing $80 to a slot's $C0n4 resets a
+; manual's probe does (p. 38): writing $80 to the mode register resets a
 ; W5100, whose mode register then reads $00; writing $03 then reads back
 ; $03. Slots are tried in the manual's order, skipping slot 3 when the
 ; VideoTerm is there.
+;
+; The manual probes at $C0n4, but only A1-A0 reach the W5100 (schematic,
+; pp. 47-48), so $C0nC is the same mode register -- and it's harmless to
+; the cards the probe passes on the way: $C0n4 is the host file card's
+; print register, where the probe's two bytes became a print job, while
+; $C0nC is unused there and on the SoftCard II, and is the Disk II's idle
+; read-latch switch.
 
 .export net_start, net_slot
 .import ip65_init, dhcp_init, cfg_ip
 .import scr_puts, scr_put_dec, scr_put_ip, scr_crlf, scr_driver
+
+MODE = $C08C                ; the W5100's mode register at $C0nC, with X = slot * 16
 
 .bss
 net_slot: .res 1
@@ -43,14 +52,14 @@ net_start:
         asl
         tax
         lda #$80
-        sta $C084,x
+        sta MODE,x
         nop
         nop
-        lda $C084,x
+        lda MODE,x
         bne @next
         lda #$03
-        sta $C084,x
-        lda $C084,x
+        sta MODE,x
+        lda MODE,x
         cmp #$03
         beq @found
 @next:  iny

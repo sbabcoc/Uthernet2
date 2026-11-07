@@ -1,6 +1,7 @@
 package com.nordstrom.uthernet.apple;
 
 import com.nordstrom.emulator.MemoryBus;
+import com.nordstrom.emulator.system.SlotCard;
 import com.nordstrom.emulator.cpu.Cpu6502;
 import com.nordstrom.uthernet.slot.Uthernet2;
 
@@ -35,6 +36,7 @@ final class AppleMachine implements MemoryBus {
     final int[] ram = new int[0xC000];
     final Uthernet2 card = new Uthernet2();
     final VideoTermDouble videoTerm;
+    private final SlotCard[] otherCards = new SlotCard[8];
     private final Deque<int[]> keys = new ArrayDeque<>();
     private int keyLatch;
     private boolean shiftHeld;
@@ -59,6 +61,11 @@ final class AppleMachine implements MemoryBus {
             }
         }
         card.configure(new Properties());
+    }
+
+    /** Puts another card's I/O switches in a slot (its ROM isn't mapped). */
+    void plugIn(int slot, SlotCard other) {
+        otherCards[slot] = other;
     }
 
     /** Releases the card's host sockets. */
@@ -269,6 +276,11 @@ final class AppleMachine implements MemoryBus {
                 return videoTerm.readIo(offset);
             }
             videoTerm.writeIo(offset, value);
+        } else if (slot >= 0 && otherCards[slot] != null) {
+            if (value < 0) {
+                return otherCards[slot].readIoSwitch(offset);
+            }
+            otherCards[slot].writeIoSwitch(offset, value);
         }
         return 0;
     }

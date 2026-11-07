@@ -1,5 +1,6 @@
 package com.nordstrom.uthernet.apple;
 
+import com.nordstrom.emulator.transfer.HostTransferCard;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
@@ -10,6 +11,8 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Properties;
 import java.util.Arrays;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -236,6 +239,29 @@ class TelnetTest {
                 assertEquals(expected, apple.hiresByte(row, line, index) & 0x7F,
                     "row " + row + " erased from " + from + ": scan line " + line + ", byte " + index);
             }
+        }
+    }
+
+    /**
+     * Finding the card mustn't disturb the cards the probe passes on the way.
+     * Slot 2 is probed before slot 1; with ReplicApple2Plus's host file card
+     * there, probing at $C0n4 -- its print register -- left a two-character
+     * print job.
+     */
+    @Test
+    void findsTheCardWithoutDisturbingTheHostFileCard() throws Exception {
+        HostTransferCard hostFiles = new HostTransferCard();
+        Properties props = new Properties();
+        props.setProperty("dir", Files.createTempDirectory("hostfiles").toString());
+        hostFiles.configure(props);
+        AppleMachine apple = new AppleMachine(true, "telnet.bin");
+        apple.plugIn(2, hostFiles);
+        try {
+            apple.runUntil(() -> apple.screenContains("Connect to host"), 30_000, "the host prompt");
+            assertTrue(apple.screenContains("Looking for the Uthernet II... slot 1"), apple.screen());
+            assertFalse(hostFiles.printSpool().hasJob(), "nothing printed");
+        } finally {
+            apple.close();
         }
     }
 
