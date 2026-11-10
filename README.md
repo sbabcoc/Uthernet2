@@ -51,32 +51,28 @@ system: boot your own DOS 3.3 or ProDOS disk, then `BRUN TELNET` or
 them onto your boot disk.
 
 - **TELNET** connects to telnet BBSes. It answers a BBS's telnet options
-  (terminal type VT100, window size 80x24) and shows its ANSI screens --
-  cursor movement, erasing, and the cursor position report BBSes use to
-  detect ANSI. Colors are ignored, and PC box-drawing characters show as
-  `+`, `-` and `|`. ESC then Q disconnects; ESC ESC sends ESC. With a
-  Saturn card, ESC then `-` shows the last 1,024 lines to scroll off the
-  top: `-` goes back a page, SPACE forward, ESC returns to the session.
-- **GOPHER** browses Gopher servers: numbered menus (type the number of an
-  item on the page shown, then RETURN), paging with SPACE and -, searches,
-  ESC to go back, G to go somewhere else (`host[:port]` or a `gopher://`
-  URL), Q to quit. Text, menu and search items open; other types are
-  listed only. Menus and text both stream a page at a time, so any size
-  can be read. Paging back redraws from a Saturn card when there is one
-  (up to 84K of each document is kept there), and otherwise fetches it
-  again and skips ahead.
+  (terminal type VT100, window size 80x24) and shows its ANSI screens.
+  With a Saturn card, it keeps the last 1,024 lines to scroll off the top.
+- **GOPHER** browses Gopher servers: menus, text documents and searches.
+  Menus and text both stream a page at a time, so any size can be read.
+  With a Saturn card, paging back redraws from the card instead of
+  fetching again.
 
-Both find the card in any slot, by the probe in the Uthernet II manual,
-and get an address over DHCP. Both look for a Saturn 128K card in slot 0,
-in place of the Language Card (`type=saturn128` in `[0]`), and use its
-banks 2-8; bank 1 is the Language Card memory ProDOS or DOS 3.3 uses,
-and is left alone. Without one they work as before. Both draw an 80-column screen: on the
-VideoTerm when slot 3 holds one (firmware 2.4 requires slot 3, so the
-Uthernet II then goes elsewhere), otherwise as "Soft-70" text on the
-Hi-Res screen, which shows 70 of the 80 columns at a time; the left and
-right arrows switch halves (in TELNET, after ESC). With the shift-key mod on pushbutton
-2, letters typed without Shift are lowercase. The II+ keyboard can't type
-`[ \ _ { } | ~` or the backquote.
+![TELNET connected to The Norse Wanderer BBS](docs/images/telnet-bbs.png)
+
+Both find the card in any slot and get an address over DHCP. Both use a
+Saturn 128K card in slot 0, in place of the Language Card
+(`type=saturn128` in `[0]`), when there is one: its banks 2-8; bank 1 is
+the Language Card memory ProDOS or DOS 3.3 uses, and is left alone.
+Neither needs one. Both draw an 80-column screen: on the VideoTerm when
+slot 3 holds one (firmware 2.4 requires slot 3, so the Uthernet II then
+goes elsewhere), otherwise as "Soft-70" text on the Hi-Res screen, which
+shows 70 of the 80 columns at a time. With the shift-key mod on
+pushbutton 2, letters typed without Shift are lowercase.
+
+[UTILITIES.md](UTILITIES.md) describes both programs in full, with
+screenshots: connecting, every key, the scrollback, Gopher addresses,
+and how menus and documents are paged.
 
 ## Installing
 
@@ -95,6 +91,7 @@ looks for it in slot 3 by default.
 | `com.nordstrom.uthernet.net` | The virtual network: host sockets, the gateway, DHCP and DNS |
 | `com.nordstrom.uthernet.slot` | The ReplicApple2Plus plug-in card |
 | `src/apple` | The utilities' 6502 source, their Makefile, and the disk images |
+| `docs/images` | The screenshots in UTILITIES.md and this README |
 
 ## Building
 
@@ -105,7 +102,10 @@ in that project), at the version named in `gradle.properties`.
 
 The utilities and their disk images are checked in, so that needs nothing
 else. Rebuilding them takes cc65, an IP65 checkout and AppleCommander; see
-`src/apple/Makefile`.
+`src/apple/Makefile`. `./gradlew screenshots` captures the screenshots in
+`docs/images` again, from the programs in `src/test/resources`; it
+connects to The Norse Wanderer BBS and `gopher.floodgap.com`, so it
+needs Internet access.
 
 ## Verification
 

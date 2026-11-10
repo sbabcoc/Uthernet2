@@ -106,6 +106,19 @@ test {
     useJUnitPlatform()
 }
 
+/*
+ * Captures the screenshots in docs/images: runs the utilities on the 6502,
+ * connected to The Norse Wanderer BBS and gopher.floodgap.com (so it needs
+ * Internet access), and draws the Soft-70 screen with ReplicApple2Plus's
+ * Hi-Res renderer.
+ */
+tasks.register('screenshots', JavaExec) {
+    description = 'Captures the utilities\' screenshots in docs/images'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.nordstrom.uthernet.apple.Screenshots'
+    args 'docs/images'
+}
+
 publishing {
     publications {
         mavenJava(MavenPublication) {
