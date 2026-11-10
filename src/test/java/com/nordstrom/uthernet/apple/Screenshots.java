@@ -1,11 +1,13 @@
 package com.nordstrom.uthernet.apple;
 
-import com.nordstrom.emulator.MemoryBus;
-import com.nordstrom.emulator.system.HiResRenderer;
-import com.nordstrom.emulator.system.VideoSoftSwitches;
+import com.nordstrom.emulator.expansion.VideoTerm;
+import com.nordstrom.emulator.expansion.VideoTermRenderer;
+import com.nordstrom.emulator.system.RomFiles;
 
 import javax.imageio.ImageIO;
 import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.BufferedReader;
 import java.io.File;
@@ -13,19 +15,27 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Properties;
 
 /**
  * Captures the documentation's screenshots: runs TELNET and GOPHER on the
  * 6502 (AppleMachine), connected through the card's virtual network to
- * The Norse Wanderer BBS and Floodgap's Gopher server, and draws the
- * Soft-70 Hi-Res screen with ReplicApple2Plus's own HiResRenderer at the
- * application's 3x scale. Needs Internet access.
+ * The Norse Wanderer BBS and Floodgap's Gopher server, with a VideoTerm in
+ * slot 3, and draws its 80-column screen the way ReplicApple2Plus does: the
+ * card model's own VideoTermRenderer, green on black, scaled to the
+ * application's screen. Needs Internet access, and the VideoTerm's two ROM
+ * images in the folder given as the second argument.
+ * <p>
+ * Arguments: the folder to write the images to, then the ROM folder.
  */
 public final class Screenshots {
 
-    private static final int SCALE = 3;
+    /** The application's screen: 280x192 at 3x, which its 80-column view fills. */
+    private static final int WIDTH = 840, HEIGHT = 576;
+    private static final int LIT = Color.GREEN.getRGB();
     private static final String BBS = "www.norsewanderer.com:2323";
     private static final String GOPHER_HOST = "gopher.floodgap.com";
     private static final int GOPHER_PORT = 70;
@@ -34,8 +44,13 @@ public final class Screenshots {
     private static File out;
 
     public static void main(String[] args) throws Exception {
-        out = new File(args.length > 0 ? args[0] : "docs/images");
+        if (args.length < 2) {
+            throw new IllegalArgumentException("usage: Screenshots <image folder> <ROM folder>;"
+                + " with Gradle: ./gradlew screenshots -Proms=<ROM folder>");
+        }
+        out = new File(args[0]);
         out.mkdirs();
+        RomFiles.setDirectory(Path.of(args[1]));
         telnet();
         gopher();
     }
@@ -44,7 +59,7 @@ public final class Screenshots {
     // TELNET
 
     private static void telnet() throws Exception {
-        AppleMachine apple = new AppleMachine(false, "telnet.bin");
+        AppleMachine apple = machine("telnet.bin");
         try {
             apple.runUntil(() -> apple.screenContains("Connect to host"), 30_000, "the host prompt");
             apple.type(BBS);
@@ -73,7 +88,7 @@ public final class Screenshots {
         int[] textItem = locate(menu, '0');
         int[] searchItem = locate(menu, '7');
 
-        AppleMachine apple = new AppleMachine(false, "gopher.bin");
+        AppleMachine apple = machine("gopher.bin");
         try {
             apple.runUntil(() -> apple.screenContains("Go to host"), 30_000, "the go-to prompt");
             apple.type(GOPHER_HOST + "\r");
@@ -178,27 +193,42 @@ public final class Screenshots {
         }
     }
 
-    private static void save(AppleMachine apple, String name) throws IOException {
-        MemoryBus bus = new MemoryBus() {
-            @Override
-            public int read(int address) {
-                return apple.ram[address];
-            }
+    /** @return the machine with a real VideoTerm in slot 3 */
+    private static AppleMachine machine(String program) throws IOException {
+        AppleMachine apple = new AppleMachine(false, program);
+        VideoTerm videoTerm = new VideoTerm();
+        videoTerm.configure(new Properties());
+        apple.plugInWithRom(3, videoTerm);
+        Screenshots.videoTerm = videoTerm;
+        return apple;
+    }
 
-            @Override
-            public void write(int address, int value) {
-            }
-        };
-        Color[][] pixels = HiResRenderer.render(bus, new VideoSoftSwitches());
-        int w = pixels[0].length, h = pixels.length;
-        BufferedImage image = new BufferedImage(w * SCALE, h * SCALE, BufferedImage.TYPE_INT_RGB);
-        for (int y = 0; y < h * SCALE; y++) {
-            for (int x = 0; x < w * SCALE; x++) {
-                image.setRGB(x, y, pixels[y / SCALE][x / SCALE].getRGB());
+    /** The VideoTerm of the machine running now. */
+    private static VideoTerm videoTerm;
+
+    private static void save(AppleMachine apple, String name) throws IOException {
+        if (!apple.text || !apple.an0) {
+            throw new IllegalStateException("the 80-column screen isn't showing; screen:\n" + apple.screen());
+        }
+        boolean[][] dots = VideoTermRenderer.render(videoTerm, true);
+        BufferedImage card = new BufferedImage(dots[0].length, dots.length, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < dots.length; y++) {
+            for (int x = 0; x < dots[y].length; x++) {
+                if (dots[y][x]) {
+                    card.setRGB(x, y, LIT);
+                }
             }
         }
+        BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+            g.drawImage(card, 0, 0, WIDTH, HEIGHT, null);
+        } finally {
+            g.dispose();
+        }
         ImageIO.write(image, "png", new File(out, name));
-        System.out.println(name + "\n" + apple.screen());
+        System.out.println(name + "\n" + VideoTermRenderer.text(videoTerm));
     }
 
     private Screenshots() {

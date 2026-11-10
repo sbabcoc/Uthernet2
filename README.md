@@ -102,10 +102,12 @@ in that project), at the version named in `gradle.properties`.
 
 The utilities and their disk images are checked in, so that needs nothing
 else. Rebuilding them takes cc65, an IP65 checkout and AppleCommander; see
-`src/apple/Makefile`. `./gradlew screenshots` captures the screenshots in
-`docs/images` again, from the programs in `src/test/resources`; it
-connects to The Norse Wanderer BBS and `gopher.floodgap.com`, so it
-needs Internet access.
+`src/apple/Makefile`. `./gradlew screenshots -Proms=DIR` captures the
+screenshots in `docs/images` again, from the programs in
+`src/test/resources`, on the VideoTerm's 80-column screen. It connects to
+The Norse Wanderer BBS and `gopher.floodgap.com`, so it needs Internet
+access, and reads the VideoTerm's two ROM images from `DIR` -- the same
+files, by the same names, as ReplicApple2Plus's ROM folder holds.
 
 ## Verification
 

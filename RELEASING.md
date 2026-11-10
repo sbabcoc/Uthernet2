@@ -46,7 +46,8 @@ Before tagging, verify:
    outputs committed (`make` there; see its header for what it needs):
    both disk images in `src/apple/disks/` and the two programs it copies
    to `src/test/resources/`. If what the programs show changed, the
-   screenshots are captured again (`./gradlew screenshots`) and committed.
+   screenshots are captured again (`./gradlew screenshots -Proms=DIR`,
+   with `DIR` holding the VideoTerm's ROM images) and committed.
 5. README.md, UTILITIES.md and HARDWARE-REFERENCE.md are up to date.
 
 > **IMPORTANT**: Do a full build verification BEFORE tagging. If a bug is

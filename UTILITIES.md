@@ -10,8 +10,8 @@ GitHub release:
 | `uthernet2-dos33.dsk` | DOS 3.3 |
 | `uthernet2-prodos.po` | ProDOS (with BASIC.SYSTEM) |
 
-The screenshots here are of the Soft-70 screen (see [The screen](#the-screen)),
-drawn as ReplicApple2Plus draws the Hi-Res page. TELNET is connected to
+The screenshots here are of the VideoTerm's 80-column screen (see
+[The screen](#the-screen)), drawn as ReplicApple2Plus draws it. TELNET is connected to
 [The Norse Wanderer](https://norsewanderer.com), an Apple II BBS from
 the 1980s, back online (`www.norsewanderer.com`, port 2323); GOPHER to
 Floodgap's Gopher server, `gopher.floodgap.com`.

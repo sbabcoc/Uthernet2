@@ -109,14 +109,20 @@ test {
 /*
  * Captures the screenshots in docs/images: runs the utilities on the 6502,
  * connected to The Norse Wanderer BBS and gopher.floodgap.com (so it needs
- * Internet access), and draws the Soft-70 screen with ReplicApple2Plus's
- * Hi-Res renderer.
+ * Internet access), with a VideoTerm in slot 3, and draws its 80-column
+ * screen with ReplicApple2Plus's VideoTerm renderer. The VideoTerm's ROM
+ * images aren't distributed, so -Proms names the folder holding them:
+ *
+ *     ./gradlew screenshots -Proms=<ROM folder>
  */
 tasks.register('screenshots', JavaExec) {
-    description = 'Captures the utilities\' screenshots in docs/images'
+    description = 'Captures the utilities\' screenshots in docs/images (-Proms=<ROM folder>)'
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.nordstrom.uthernet.apple.Screenshots'
     args 'docs/images'
+    if (project.hasProperty('roms')) {
+        args project.property('roms')
+    }
 }
 
 publishing {

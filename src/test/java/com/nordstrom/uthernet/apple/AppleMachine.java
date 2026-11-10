@@ -16,7 +16,8 @@ import java.util.function.BooleanSupplier;
  * Just enough Apple II+ to run the utilities in src/apple on
  * ReplicApple2Plus's 6502: 48K of RAM, the keyboard with the shift-key mod
  * on pushbutton 2, the display soft switches, the Uthernet II in slot 1,
- * optionally a {@link VideoTermDouble} in slot 3, optionally a card in slot 0
+ * optionally a {@link VideoTermDouble} in slot 3 -- or a real card there,
+ * whose own ROM and $C800 expansion ROM are mapped -- optionally a card in slot 0
  * that bank-switches $D000-$FFFF (a Saturn or Language Card), and a
  * stand-in ROM that
  * is all RTS except the Monitor's WAIT, which IP65's timer calls. A
@@ -39,8 +40,12 @@ final class AppleMachine implements MemoryBus {
     final Uthernet2 card = new Uthernet2();
     final VideoTermDouble videoTerm;
     private final SlotCard[] otherCards = new SlotCard[8];
+    /** The cards plugged in with their ROM mapped, by slot. */
+    private final SlotCard[] romCards = new SlotCard[8];
     /** The card in slot 0 that bank-switches $D000-$FFFF, or null. */
     private SlotCard upperMemory;
+    /** The slot whose card owns $C800-$CFFF, or 0 for none. */
+    private int expansionOwner;
     private final Deque<int[]> keys = new ArrayDeque<>();
     private int keyLatch;
     private boolean shiftHeld;
@@ -71,6 +76,18 @@ final class AppleMachine implements MemoryBus {
     void plugIn(int slot, SlotCard other) {
         otherCards[slot] = other;
     }
+
+    /**
+     * Puts a card in a slot with its ROM mapped as well: its own page at
+     * $Cn00, and $C800-$CFFF while it owns that space -- claimed by an access
+     * to its own page, released by an access to $CFFF. The slot must not be
+     * the VideoTermDouble's.
+     */
+    void plugInWithRom(int slot, SlotCard other) {
+        plugIn(slot, other);
+        romCards[slot] = other;
+    }
+
 
     /** Puts a card that bank-switches $D000-$FFFF in slot 0, as the Saturn or Language Card goes. */
     void plugInUpperMemory(SlotCard card) {
@@ -210,7 +227,10 @@ final class AppleMachine implements MemoryBus {
             return readIo(address);
         }
         if (address < 0xD000) {
-            return videoTerm == null ? 0 : videoTerm.readSlotSpace(address);
+            if (videoTerm != null) {
+                return videoTerm.readSlotSpace(address);
+            }
+            return slotSpace(address, -1);
         }
         if (upperMemory != null) {
             java.util.OptionalInt ram = upperMemory.readUpperMemory(address - 0xD000);
@@ -239,10 +259,43 @@ final class AppleMachine implements MemoryBus {
         } else if (address < 0xD000) {
             if (videoTerm != null) {
                 videoTerm.writeSlotSpace(address, value);
+            } else {
+                slotSpace(address, value);
             }
         } else if (upperMemory != null) {
             upperMemory.writeUpperMemory(address - 0xD000, value);
         }
+    }
+
+    /** $C100-$CFFF for cards plugged in with their ROM: a read when value is -1, else a write. */
+    private int slotSpace(int address, int value) {
+        int result = 0;
+        if (address < 0xC800) {
+            int slot = (address >> 8) & 7;
+            SlotCard card = romCards[slot];
+            if (card != null && card.hasRom()) {
+                if (card.wantsExpansionRom()) {
+                    expansionOwner = slot;
+                }
+                if (value < 0) {
+                    result = card.readRom(address & 0xFF);
+                } else {
+                    card.writeRom(address & 0xFF, value);
+                }
+            }
+        } else if (expansionOwner != 0) {
+            SlotCard owner = romCards[expansionOwner];
+            if (value < 0) {
+                result = owner.readExpansionRom(address - 0xC800);
+            } else {
+                owner.writeExpansionRom(address - 0xC800, value);
+            }
+            if (address == 0xCFFF) {
+                expansionOwner = 0;
+                owner.onExpansionRomReleased();
+            }
+        }
+        return result;
     }
 
     private int readIo(int address) {
