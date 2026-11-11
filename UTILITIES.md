@@ -56,7 +56,9 @@ Both programs draw an 80-column, 24-line screen:
 
 The II+ keyboard types capitals only. With ReplicApple2Plus's shift-key
 mod on pushbutton 2, letters typed without Shift are lowercase. The II+
-keyboard can't type `` [ \ _ { } | ~ `` or the backquote.
+keyboard has no keys for `` [ \ _ { } | ~ `` or the backquote;
+ReplicApple2Plus types them as Ctrl-V and then a key standing for one
+(see its README), and both programs take them like any key.
 
 ## TELNET
 
