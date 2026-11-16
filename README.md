@@ -96,7 +96,8 @@ looks for it in slot 3 by default.
 ## Building
 
 ReplicApple2Plus must be in the local Maven repository (`./gradlew install`
-in that project), at the version named in `gradle.properties`.
+in that project), at the version named in `gradle.properties` (1.9.0 or
+later: the runner tests use its headless runner).
 
     ./gradlew build
 
@@ -131,3 +132,12 @@ files, by the same names, as ReplicApple2Plus's ROM folder holds.
   ReplicApple2Plus's 6502, paced to real time: it leases an address,
   looks up `localhost`, and echoes a line over TCP. The 6502 program is
   `src/test/asm/ip65test.s`; `src/test/asm/Makefile` rebuilds it.
+- `UtilitiesRunnerTest` runs the DOS 3.3 utility disk on a whole Apple
+  II+: ReplicApple2Plus's headless runner, in real time, with the real
+  Autostart ROM, DOS 3.3 booted from its System Master, the Uthernet II in
+  slot 1 and the real VideoTerm in slot 3. It runs TELNET against the
+  scripted BBS and GOPHER against a Gopher server on the host's loopback,
+  typing through the keyboard and reading the VideoTerm's screen. The
+  System Master and the ROM images aren't distributed:
+  `./gradlew test -Pdos33Master=/path/to/master.dsk -Proms=/path/to/roms`,
+  naming the folder with `system-rom.rom` and the VideoTerm's two ROMs.

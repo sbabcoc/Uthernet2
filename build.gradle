@@ -102,8 +102,23 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
+/*
+ * The tests on ReplicApple2Plus's headless runner boot DOS 3.3 with the real
+ * Apple II+ and VideoTerm ROMs, none of which is distributed:
+ *     ./gradlew test -Pdos33Master=<System Master image> -Proms=<ROM folder>
+ */
 test {
     useJUnitPlatform()
+    if (project.hasProperty('dos33Master')) {
+        systemProperty 'uthernet.dos33Master', file(project.property('dos33Master')).absolutePath
+    }
+    if (project.hasProperty('roms')) {
+        systemProperty 'runner.roms', file(project.property('roms')).absolutePath
+    }
+    // the runner runs in a JVM of its own, on the tests' class path
+    doFirst {
+        systemProperty 'runner.classpath', sourceSets.test.runtimeClasspath.asPath
+    }
 }
 
 /*

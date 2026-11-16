@@ -31,7 +31,7 @@ class TelnetTest {
     private static final byte ESC = 0x1B;
 
     /** A BBS that negotiates, draws a screen, asks where the cursor is, and reads a line. */
-    private static final class Bbs implements Runnable {
+    static final class Bbs implements Runnable {
         final ServerSocket server;
         final ByteArrayOutputStream received = new ByteArrayOutputStream();
         volatile boolean ended;

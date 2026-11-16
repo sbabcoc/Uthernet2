@@ -14,6 +14,8 @@ it. ReplicApple2Plus's own RELEASING.md covers that release.
   under server ID `ossrh`
 - The `gh` CLI, signed in to GitHub
 - Gradle wrapper present in the project
+- The DOS 3.3 System Master and the Apple II+ and VideoTerm ROM images,
+  for the runner tests
 
 ## Version Numbering
 
@@ -36,7 +38,7 @@ Before tagging, verify:
 2. All changes are committed and pushed.
 3. The project builds cleanly, with no test skipped:
    ```bash
-   ./gradlew clean build
+   ./gradlew clean build -Pdos33Master=/path/to/master.dsk -Proms=/path/to/roms
    grep -l 'skipped="[1-9]' build/test-results/test/*.xml
    ```
    `Ip65Test` and the gateway and card tests open sockets on the loopback
