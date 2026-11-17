@@ -48,14 +48,12 @@ src/test/resources/telnet.bin, src/test/resources/gopher.bin
 Font
 ------------------------------------------------------------------------
 
-src/apple/tables.s (the Soft-70 font)
+src/apple/s70font.txt, and the Soft-70 font in src/apple/tables.s
 
-    Derived from Tom Thumb, a 3x5 font by Robey Pointer based on Brian
-    Swetland's VT100 emulator font, as converted in Adafruit's GFX library
-    (Fonts/TomThumb.h). Both authors have authorized its use under CC0 or
-    CC-BY 3.0 (http://robey.lag.net/2010/01/23/tiny-monospace-font.html);
-    this project uses it under CC0. src/apple/gentables.py does the
-    conversion.
+    a2lib's Soft-70 default font (https://github.com/sbabcoc/a2lib,
+    tools/s70font.txt), copied unchanged. Copyright (c) 2026 Scott
+    Babcock; zlib license (https://zlib.net/zlib_license.html), whose
+    notice the file keeps. src/apple/gentables.py does the conversion.
 
 ------------------------------------------------------------------------
 Used to build, not included

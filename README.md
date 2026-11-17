@@ -125,7 +125,10 @@ files, by the same names, as ReplicApple2Plus's ROM folder holds.
 - `TelnetTest` and `GopherTest` run the utilities' own binaries on the
   6502, against a scripted BBS and a Gopher server on the host's loopback:
   telnet negotiation, the ANSI screen, the cursor report, lowercase input,
-  menus, paging, search, and both screens. The VideoTerm side runs against
+  menus, paging, search, and both screens. On Soft-70 they check the whole
+  Hi-Res page against the buffer drawn with `src/apple/s70font.txt`, after
+  scrolling lines of every length, and the blinking cursor, the position
+  gauge and the text marker. The VideoTerm side runs against
   `VideoTermDouble`, a stand-in written from ReplicApple2Plus's hardware
   reference, since the real card model needs Videx's ROMs.
 - `Ip65Test` runs IP65's own Uthernet II driver and TCP/IP stack on

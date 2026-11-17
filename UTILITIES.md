@@ -54,6 +54,18 @@ Both programs draw an 80-column, 24-line screen:
   80 columns -- a BBS is told the window is 80x24 -- so nothing is
   rewrapped; the columns out of view are a key press away.
 
+Soft-70 is the display of [a2lib](https://github.com/sbabcoc/a2lib)'s
+Soft-70, with its font: characters 3 pixels wide, upper and lowercase,
+with descenders. It is drawn for a monochrome monitor, as hi-res text was
+in the period; on a colour monitor the text shows colour fringes. The
+cursor is the cell drawn in inverse, blinking about twice a second. After
+the left or right arrow, a bar along the bottom of the screen shows for
+about a second where the 70 columns are: dotted across the whole 80, solid
+over the 70 in view. ReplicApple2Plus's Copy Screen Text copies all 80
+columns of a Soft-70 screen, including those out of view (in ReplicApple2Plus
+releases after 1.9.0), through a marker the programs leave in memory for it, in
+the format a2lib documents (its DESIGN.md, section 3.9).
+
 The II+ keyboard types capitals only. With ReplicApple2Plus's shift-key
 mod on pushbutton 2, letters typed without Shift are lowercase. The II+
 keyboard has no keys for `` [ \ _ { } | ~ `` or the backquote;

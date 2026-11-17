@@ -5,6 +5,7 @@
 ; pushbutton 2 also reads bit 7 clear, so letters stay uppercase.
 
 .export kbd_avail, kbd_get
+.import scr_idle
 
 KBD     = $C000
 KBDSTRB = $C010
@@ -18,8 +19,12 @@ kbd_avail:
         asl
         rts
 
+KBD_PASS = 7                ; a pass of the wait below: 59 cycles, in scr_idle's units (8 cycles)
+
 ; Waits for a key; returns it in A, bit 7 clear.
 kbd_get:
+        lda #KBD_PASS
+        jsr scr_idle
         lda KBD
         bpl kbd_get
         sta KBDSTRB

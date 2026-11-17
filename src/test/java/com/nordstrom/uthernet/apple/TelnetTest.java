@@ -160,6 +160,107 @@ class TelnetTest {
         }
     }
 
+    /**
+     * Lines of every length from 0 to 80, so rows scroll into rows both
+     * longer and shorter than themselves, and blanks written past a row's
+     * end: Soft-70 must still show exactly what the buffer holds. Then the
+     * cursor blinks, a pan shows the gauge for about a second, and the text
+     * marker says where the text is, until the program exits.
+     */
+    @Test
+    void scrollsBlinksAndMarksItsTextOnSoft70() throws Exception {
+        ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+        Thread thread = new Thread(() -> {
+            try (Socket s = server.accept()) {
+                OutputStream out = s.getOutputStream();
+                StringBuilder lines = new StringBuilder();
+                for (int i = 0; i < 60; i++) {
+                    int length = i * 37 % 81;
+                    StringBuilder line = new StringBuilder();
+                    for (int c = 0; c < length; c++) {
+                        line.append((char) ('!' + (i + c) % 94));
+                    }
+                    if (i % 7 == 3) {
+                        line.append(" ".repeat(Math.max(0, 80 - length)));   // blanks to the end
+                    }
+                    lines.append(line).append(line.length() == 80 ? "" : "\r\n");
+                }
+                out.write((lines + "gjpqy_,;").getBytes(StandardCharsets.US_ASCII));
+                out.flush();
+                s.getInputStream().read();
+            } catch (IOException e) {
+                // the test fails on what the Apple saw
+            }
+        });
+        thread.setDaemon(true);
+        thread.start();
+        AppleMachine apple = new AppleMachine(false, "telnet.bin");
+        try {
+            apple.runUntil(() -> apple.screenContains("Connect to host"), 30_000, "the host prompt");
+            int m = AppleMachine.MARKER;
+            assertEquals("A2SCR80", new String(new byte[] {
+                (byte) apple.ram[m], (byte) apple.ram[m + 1], (byte) apple.ram[m + 2], (byte) apple.ram[m + 3],
+                (byte) apple.ram[m + 4], (byte) apple.ram[m + 5], (byte) apple.ram[m + 6]}, StandardCharsets.US_ASCII));
+            assertEquals(1, apple.ram[m + 7], "version");
+            assertEquals(80, apple.ram[m + Soft70View.MARKER_COLUMNS]);
+            assertEquals(24, apple.ram[m + Soft70View.MARKER_ROWS]);
+            assertEquals(70, apple.ram[m + Soft70View.MARKER_VISIBLE]);
+            assertEquals(2, apple.ram[m + Soft70View.MARKER_ENCODING], "plain ASCII");
+            assertEquals(AppleMachine.SCREEN, apple.ram[m + Soft70View.MARKER_BUFFER]
+                | apple.ram[m + Soft70View.MARKER_BUFFER + 1] << 8, "the buffer, directly after");
+            int left = apple.ram[m + Soft70View.MARKER_LEFT] | apple.ram[m + Soft70View.MARKER_LEFT + 1] << 8;
+            assertEquals(0, apple.ram[left], "columns 0-69 shown");
+
+            apple.type("10.0.2.2:" + server.getLocalPort() + "\r");
+            apple.runUntil(() -> apple.row(23).startsWith("gjpqy_,;"), 30_000, "the lines");
+            apple.runFor(300);
+            assertEquals(null, Soft70View.mismatch(apple, 0, 23, 8), apple.screen());
+
+            boolean on = false, off = false;
+            int changes = 0;
+            boolean last = Soft70View.inverted(apple, 23, 8, ' ');
+            for (int i = 0; i < 30; i++) {                              // 1.5 s
+                apple.runFor(50);
+                boolean now = Soft70View.inverted(apple, 23, 8, ' ');
+                on |= now;
+                off |= !now && Soft70View.cellPixels(apple, 23, 0, 8) == 0;
+                changes += now != last ? 1 : 0;
+                last = now;
+            }
+            assertTrue(on && off, "the cursor, an inverse cell, blinks");
+            assertTrue(changes >= 4 && changes <= 8, changes + " changes in 1.5 s: about 2 Hz");
+
+            apple.type("\u001b\u0015");                               // ESC, right arrow
+            int[] right = Soft70View.gaugeBar(10);                      // row 23 is blank from column 10
+            apple.runUntil(() -> gaugeShows(apple, right), 5_000, "the gauge, thumb over columns 10-79, after the redraw");
+            assertEquals(10, apple.ram[left], "columns 10-79 shown");
+            apple.runFor(1500);
+            for (int b = 0; b < 40; b++) {
+                assertEquals(0, apple.hiresByte(Soft70View.GAUGE_ROW, Soft70View.GAUGE_LINE, b), "the gauge gone");
+            }
+            assertEquals(null, Soft70View.mismatch(apple, 10, 23, 8), apple.screen());
+
+            apple.type("\u001b\u0008");                               // ESC, left arrow
+            int[] leftBar = Soft70View.gaugeBar(0);
+            apple.runUntil(() -> apple.hiresByte(23, 7, 39) == leftBar[39], 5_000, "the gauge, after the redraw");
+            for (int b = 0; b < 4; b++) {                               // "gjpqy_,", before the cursor
+                assertEquals(Soft70View.drawnByte(apple, 0, 23, 7, b) ^ leftBar[b], apple.hiresByte(23, 7, b),
+                    "the thumb from byte 0, EORed over the descenders, at byte " + b);
+            }
+            apple.runFor(1500);
+            assertEquals(null, Soft70View.mismatch(apple, 0, 23, 8), apple.screen());
+
+            apple.type("\u001bq");
+            apple.runUntil(() -> apple.screenContains("Connection closed."), 20_000, "the disconnect");
+            apple.type("\r");
+            apple.runUntil(() -> apple.exited, 10_000, "the program to quit");
+            assertEquals(0, apple.ram[m], "no marker once the program has gone");
+        } finally {
+            apple.close();
+            server.close();
+        }
+    }
+
     @Test
     void drawsOnTheVideoTermAndScrollsItsDisplay() throws Exception {
         ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
@@ -221,11 +322,22 @@ class TelnetTest {
             apple.type("\r");
             apple.runUntil(() -> apple.exited, 10_000, "the program to quit");
             assertFalse(apple.an0, "back to 40 columns");
+            assertEquals(0, apple.ram[AppleMachine.MARKER], "no text marker: the VideoTerm holds the text");
             assertEquals(0, vt.start(), "display start reset for the firmware");
         } finally {
             apple.close();
             server.close();
         }
+    }
+
+    /** @return true if row 23's bottom scan line is exactly the gauge's bar (the row blank beneath it) */
+    private static boolean gaugeShows(AppleMachine apple, int[] bar) {
+        for (int b = 0; b < 40; b++) {
+            if (apple.hiresByte(Soft70View.GAUGE_ROW, Soft70View.GAUGE_LINE, b) != bar[b]) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -278,7 +390,10 @@ class TelnetTest {
         try {
             apple.runUntil(() -> apple.screenContains("Connect to host"), 30_000, "the host prompt");
             apple.type("10.0.2.2:" + server.getLocalPort() + "\r");
-            apple.runUntil(() -> apple.row(22).startsWith("line 100"), 30_000, "the lines, and the last line feed");
+            // row 23 blank too: the buffer scrolls a row at a time, so row 22 can
+            // hold line 100 while row 23 still does
+            apple.runUntil(() -> apple.row(22).startsWith("line 100") && apple.row(23).isBlank(), 30_000,
+                "the lines, and the last line feed");
             String live = apple.screen();
             int top = Integer.parseInt(apple.row(0).trim().substring(5));
 

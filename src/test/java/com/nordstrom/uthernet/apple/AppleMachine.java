@@ -28,7 +28,9 @@ import java.util.function.BooleanSupplier;
 final class AppleMachine implements MemoryBus {
 
     static final int LOAD = 0x4000;
-    static final int SCREEN = 0x0800;
+    /** The 80x24 screen buffer, after the 16-byte text marker at $0800. */
+    static final int SCREEN = 0x0810;
+    static final int MARKER = 0x0800;
     static final int HIRES = 0x2000;
     private static final int UTHERNET_SLOT = 1;
     private static final double CYCLES_PER_MILLISECOND = 1_020.5;

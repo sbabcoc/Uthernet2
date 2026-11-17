@@ -1,15 +1,39 @@
 ; Screen driver for a II+ without a VideoTerm: "Soft-70" text on Hi-Res
 ; page 1, 4-pixel cells, 70 columns of the 80-column buffer at a time.
-; scr_hscroll switches between columns 0-69 and 10-79.
+; scr_hscroll switches between columns 0-69 and 10-79. The drawing follows
+; a2lib's Soft-70 (github.com/sbabcoc/a2lib, DESIGN.md 3.8 and 3.9): its
+; font, per-row extents for scrolling, the inverse cursor, the position
+; gauge and the text marker.
 ;
 ; Each text row is 8 Hi-Res lines; row R's top line is at
 ; $2000 + (R mod 8) * $80 + (R / 8) * $28, the same layout as the text
 ; page, and each line below is $400 further on. Column X's 4 pixels start
 ; at pixel 4X, which is bit (4X mod 7) of byte (4X / 7): a cell can
-; straddle two bytes.
+; straddle two bytes. Every byte written has bit 7 clear.
+;
+; Extents: sext[R] is one more than the rightmost Hi-Res byte drawn in text
+; row R since the row was last cleared, so the row's bytes from there on
+; are blank. Scrolling and clearing touch only the bytes below the extent,
+; and a blank written beyond it isn't drawn at all.
+;
+; Gauge: after a pan, a bar on the bottom scan line of row 23, dotted
+; across the whole width with a solid thumb over the 70 columns shown,
+; drawn and removed with EOR. Whatever draws on row 23 while it is shown
+; takes it off first and puts it back after, so the cells underneath are
+; kept as they are.
+;
+; Text marker: while Soft-70 runs, the 16 bytes before the buffer hold
+; a2lib's marker (DESIGN.md 3.9), so an emulator's Copy can find the text,
+; which never reaches the text page: signature "A2SCR80", version 1,
+; 80 x 24, 70 columns shown, encoding 2 (the buffer's bytes are plain
+; ASCII, $20 a blank), the address of the leftmost column shown, and of
+; the buffer. s70_exit clears its first byte.
+
+.macpack longbranch
 
 .export s70_init, s70_exit, s70_put, s70_clear_row, s70_scroll, s70_cursor, s70_hscroll, s70_clear_span
-.import scr_row_lo, scr_row_hi
+.export s70_gauge_on, s70_gauge_off
+.import scr_row_lo, scr_row_hi, scr_marker, scr_buf
 .import s70_font, s70_shift_lo, s70_shift_hi, s70_keep_lo, s70_keep_hi
 .import s70_col_byte, s70_col_shift
 .importzp zp_d, zp_e, zp_f, zp_u0, zp_u1, zp_u2
@@ -23,9 +47,19 @@ LORES   = $C056
 HIRES_ON = $C057
 WINDOW  = 70
 MAX_OFFSET = 80 - WINDOW
+ROWS    = 24
+BARLINE = HIRES + $03D0 + 7 * $400  ; row 23, scan line 7
+ENCODING = 2                ; the marker's: plain ASCII
+
+.segment "LOWBSS"
+sext:   .res ROWS           ; each text row's extent (see above)
+barpat: .res 40             ; the gauge's bar, byte by byte
 
 .bss
 offset: .res 1              ; buffer column shown at the left edge
+inv:    .res 1              ; $0F to draw a cell inverted, else 0
+cbyte:  .res 1              ; the cell's first Hi-Res byte
+bar_on: .res 1              ; nonzero while the gauge is shown
 span_first: .res 1          ; s70_clear_span: first and last byte, and the
 span_last:  .res 1          ; bits of each to keep
 keep_first: .res 1
@@ -33,22 +67,39 @@ keep_last:  .res 1
 
 .rodata
 line_lo:
-.repeat 24, r
+.repeat ROWS, r
         .byte <(HIRES + (r .mod 8) * $80 + (r / 8) * $28)
 .endrepeat
 line_hi:
-.repeat 24, r
+.repeat ROWS, r
         .byte >(HIRES + (r .mod 8) * $80 + (r / 8) * $28)
 .endrepeat
 
 ; the bits below bit 0-7
 below:  .byte $00, $01, $03, $07, $0F, $1F, $3F, $7F
 
+; the gauge's track: even pixels lit, in even and odd bytes
+track:  .byte $55, $2A
+
+marker: .byte "A2SCR80"     ; signature, bit 7 clear
+        .byte 1             ; version
+        .byte 80, ROWS, WINDOW
+        .byte ENCODING
+        .addr offset        ; leftmost column shown (a byte)
+        .addr scr_buf       ; the buffer: rows of 80 bytes, directly after
+MARKER_SIZE = * - marker
+        .assert MARKER_SIZE = 16, error, "the text marker is 16 bytes"
+
 .code
 
 s70_init:
         lda #0
         sta offset
+        sta bar_on
+        ldx #ROWS-1
+:       sta sext,x
+        dex
+        bpl :-
         lda #<HIRES
         sta zp_d
         lda #>HIRES
@@ -62,6 +113,11 @@ s70_init:
         inc zp_d+1
         dex
         bne :-
+        ldx #MARKER_SIZE-1
+:       lda marker,x
+        sta scr_marker,x
+        dex
+        bpl :-
         lda HIRES_ON
         lda LOWSCR
         lda MIXCLR
@@ -69,13 +125,15 @@ s70_init:
         rts
 
 s70_exit:
+        lda #0              ; no marker once the text is gone
+        sta scr_marker
         lda TXTSET
         lda LORES
         rts
 
 ; Points zp_e at the top Hi-Res line of the cell for row X, screen column
 ; Y - offset; returns C set if that column isn't in the window, else the
-; cell's shift in zp_u1.
+; cell's shift in zp_u1 and its byte in cbyte. Keeps X.
 cell:
         tya
         sec
@@ -84,9 +142,10 @@ cell:
         cmp #WINDOW
         bcs @out
         tay
+        lda s70_col_byte,y
+        sta cbyte
         clc
-        lda line_lo,x
-        adc s70_col_byte,y
+        adc line_lo,x
         sta zp_e
         lda line_hi,x
         adc #0
@@ -98,8 +157,20 @@ cell:
 @out:   sec
         rts
 
+; Shows (A = 1) or hides (A = 0) the cursor at row X, column Y: the cell
+; drawn inverted, or as it is.
+s70_cursor:
+        cmp #0
+        beq s70_put
+        lda #$0F
+        sta inv
+        bne put_cell        ; always
+
 ; Draws row X, column Y of the screen buffer.
 s70_put:
+        lda #0
+        sta inv
+put_cell:
         lda scr_row_lo,x
         sta zp_d
         lda scr_row_hi,x
@@ -108,7 +179,36 @@ s70_put:
         sta zp_u0
         jsr cell
         bcs @done
-        lda zp_u0           ; glyph address: font + (char - $20) * 8
+        ldy cbyte           ; the byte after the cell
+        iny
+        lda zp_u1
+        cmp #4
+        bcc :+
+        iny
+:       lda inv             ; a blank beyond the extent is there already
+        bne @draw
+        lda zp_u0
+        cmp #' '
+        bne @draw
+        lda cbyte
+        cmp sext,x
+        bcs @done
+@draw:  tya
+        cmp sext,x
+        bcc :+
+        sta sext,x
+:       cpx #ROWS-1
+        bne draw
+        lda bar_on
+        beq draw
+        jsr barxor
+        jsr draw
+        jmp barxor
+@done:  rts
+
+; Draws the character in zp_u0 into the cell at zp_e, shift zp_u1,
+; inverted by inv.
+draw:   lda zp_u0           ; glyph address: font + (char - $20) * 8
         sec
         sbc #$20
         cmp #$7F-$20
@@ -137,6 +237,7 @@ s70_put:
         sta zp_u0           ; scan line 0-7
 @line:  ldy zp_u0
         lda (zp_f),y
+        eor inv
         ora zp_u2
         tax
         ldy #0
@@ -164,17 +265,36 @@ s70_put:
         lda zp_u0
         cmp #8
         bne @line
+        rts
+
+; Blanks text row X: the bytes drawn since it was last cleared.
+s70_clear_row:
+        lda sext,x
+        beq @done
+        cpx #ROWS-1
+        bne clear_row
+        lda bar_on
+        beq clear_row
+        jsr barxor
+        jsr clear_row
+        jmp barxor
 @done:  rts
 
-; Blanks text row X across the whole Hi-Res width.
-s70_clear_row:
+; Blanks the bytes of row X below its extent, which becomes 0.
+clear_row:
+        ldy sext,x
+        beq @done
+        dey
+        sty zp_u0           ; the last byte
+        lda #0
+        sta sext,x
         lda line_lo,x
         sta zp_e
         lda line_hi,x
         sta zp_e+1
         ldx #8
 @line:  lda #0
-        ldy #39
+        ldy zp_u0
 :       sta (zp_e),y
         dey
         bpl :-
@@ -184,7 +304,7 @@ s70_clear_row:
         sta zp_e+1
         dex
         bne @line
-        rts
+@done:  rts
 
 ; Blanks row X from column Y up to (not including) column A: the part in
 ; the window, as one run of pixels -- whole bytes in the middle, masked
@@ -192,6 +312,14 @@ s70_clear_row:
 s70_clear_span:
         sta zp_u2           ; to
         sty zp_u1           ; from
+        cpx #ROWS-1
+        bne span
+        lda bar_on
+        beq span
+        jsr barxor
+        jsr span
+        jmp barxor
+span:   ldy zp_u1
         cpy offset          ; from = max(from, offset)
         bcs :+
         lda offset
@@ -210,7 +338,10 @@ s70_clear_span:
         sbc offset
         tay
         lda s70_col_byte,y
-        sta span_first
+        cmp sext,x          ; nothing drawn from here on
+        bcc :+
+        rts
+:       sta span_first
         lda s70_col_shift,y
         tay
         lda below,y         ; keep the bits before the first pixel
@@ -270,54 +401,70 @@ s70_clear_span:
         rts
 
 ; The buffer has scrolled up a line: move the Hi-Res rows up to match.
-; One pass over the 40 byte columns, each copying that column's byte for
-; all 184 scan lines with fixed addresses: 9 cycles a byte, where a loop
-; through pointers takes about 17. No address here crosses a page, so the
-; indexed loads take no extra cycle.
+; Each row copies the bytes below the larger of its own extent and the
+; extent of the row moving into it -- 8 scan lines a byte, through
+; addresses set for the row -- and takes that row's extent. No address
+; here crosses a page, so the indexed loads take no extra cycle.
 s70_scroll:
-        ldy #39
-@column:
-.repeat 23, r
-  .repeat 8, k
-        lda HIRES + ((r + 1) .mod 8) * $80 + ((r + 1) / 8) * $28 + k * $400, y
-        sta HIRES + (r .mod 8) * $80 + (r / 8) * $28 + k * $400, y
-  .endrepeat
+        lda bar_on          ; the gauge comes off row 23 first
+        beq :+
+        jsr barxor
+:       ldx #0
+srow:   lda sext,x
+        cmp sext+1,x
+        bcs :+
+        lda sext+1,x
+:       tay
+        jeq snext           ; both blank
+        stx zp_u0
+        lda line_lo+1,x     ; loads from row X + 1, stores to row X
+.repeat 8, k
+        sta .ident(.sprintf("src%d", k))+1
+.endrepeat
+        lda line_lo,x
+.repeat 8, k
+        sta .ident(.sprintf("dst%d", k))+1
+.endrepeat
+        lda line_hi+1,x
+.repeat 8, k
+        sta .ident(.sprintf("src%d", k))+2
+  .if k < 7
+        clc
+        adc #4
+  .endif
+.endrepeat
+        lda line_hi,x
+.repeat 8, k
+        sta .ident(.sprintf("dst%d", k))+2
+  .if k < 7
+        clc
+        adc #4
+  .endif
 .endrepeat
         dey
-        bmi :+
-        jmp @column
-:       ldx #23
-        jmp s70_clear_row
+scopy:
+.repeat 8, k
+.ident(.sprintf("src%d", k)):
+        lda HIRES,y
+.ident(.sprintf("dst%d", k)):
+        sta HIRES,y
+.endrepeat
+        dey
+        bpl scopy
+        ldx zp_u0
+snext:  lda sext+1,x
+        sta sext,x
+        inx
+        cpx #ROWS-1
+        jne srow
+        jsr clear_row       ; row 23
+        lda bar_on
+        beq :+
+        jmp barxor
+:       rts
 
-; Shows (A = 1) or hides (A = 0) the cursor at row X, column Y: an
-; underline on the cell's bottom scan line, drawn by inverting it, so
-; showing and hiding are the same operation.
-s70_cursor:
-        jsr cell
-        bcs @done
-        lda zp_e+1
-        clc
-        adc #7*4            ; scan line 7
-        sta zp_e+1
-        lda zp_u1
-        asl
-        asl
-        asl
-        asl
-        ora #$0F            ; all four pixels
-        tax
-        ldy #0
-        lda (zp_e),y
-        eor s70_shift_lo,x
-        sta (zp_e),y
-        lda s70_shift_hi,x
-        beq @done
-        iny
-        eor (zp_e),y
-        sta (zp_e),y
-@done:  rts
-
-; A = 0: show columns 0-69; A = 1: show columns 10-79.
+; A = 0: show columns 0-69; A = 1: show columns 10-79. Takes the gauge
+; down; scr_hscroll puts it up.
 s70_hscroll:
         cmp #0
         beq :+
@@ -325,6 +472,7 @@ s70_hscroll:
 :       cmp offset
         beq @done
         sta offset
+        jsr s70_gauge_off
         jmp redraw
 @done:  rts
 
@@ -368,4 +516,54 @@ s70_put_keep:
         sta zp_u2
         pla
         sta zp_u0
+        rts
+
+; ---------------------------------------------------------------------
+; the position gauge
+
+; Shows the gauge for the columns now in the window: the thumb covers 35
+; of the 40 bytes (70 of 80 columns), from byte offset / 2.
+s70_gauge_on:
+        jsr s70_gauge_off
+        lda offset
+        lsr
+        sta zp_u0           ; the thumb's first byte
+        clc
+        adc #35
+        sta zp_u1           ; and the byte after its last
+        ldy #39
+@byte:  cpy zp_u0
+        bcc @track
+        cpy zp_u1
+        bcs @track
+        lda #$7F
+        bne @put            ; always
+@track: tya
+        and #1
+        tax
+        lda track,x
+@put:   sta barpat,y
+        dey
+        bpl @byte
+        jsr barxor
+        lda #1
+        sta bar_on
+        rts
+
+; Takes the gauge down, if it's shown.
+s70_gauge_off:
+        lda bar_on
+        beq :+
+        jsr barxor
+        lda #0
+        sta bar_on
+:       rts
+
+; EORs the bar onto row 23's bottom scan line. Keeps X.
+barxor: ldy #39
+:       lda BARLINE,y
+        eor barpat,y
+        sta BARLINE,y
+        dey
+        bpl :-
         rts

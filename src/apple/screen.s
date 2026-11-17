@@ -6,16 +6,22 @@
 ; Printing follows a VT100's rules: writing the last column leaves the
 ; cursor there with a wrap pending, and the next printable character
 ; starts a new line.
+;
+; The VideoTerm blinks its own cursor. Soft-70's, an inverse cell, blinks
+; at about 2 Hz, and its position gauge goes away about a second after a
+; pan, on time kept by scr_idle, which the loops that wait call: a II+ has
+; no timer, so each call says how long its loop takes.
 
 .export scr_init, scr_exit, scr_putc, scr_puts, scr_crlf, scr_goto
 .export scr_clear, scr_clear_eol, scr_clear_bol, scr_clear_line
 .export scr_clear_eos, scr_clear_bos, scr_hscroll, scr_reverse_index
 .export scr_row, scr_col, scr_buf, scr_row_lo, scr_row_hi, scr_driver
 .export scr_put_dec, scr_put_ip, scr_batch_begin, scr_batch_end
-.export scr_redraw, scroll_hook, scr_put_num4
+.export scr_redraw, scroll_hook, scr_put_num4, scr_marker, scr_idle
 
 .import vt_present, vt_init, vt_exit, vt_put, vt_clear_row, vt_scroll, vt_cursor, vt_hscroll, vt_clear_span
 .import s70_init, s70_exit, s70_put, s70_clear_row, s70_scroll, s70_cursor, s70_hscroll, s70_clear_span
+.import s70_gauge_on, s70_gauge_off
 .import beep, cp437_map
 .importzp zp_sa, zp_sb, zp_sc, zp_s0, zp_s1, zp_s2
 .importzp drv_init_vec, drv_exit_vec, drv_put_vec, drv_clear_row_vec
@@ -23,8 +29,11 @@
 
 COLS = 80
 ROWS = 24
+TICK = 31890                ; 250 ms, in units of 8 cycles (1,020.5 a millisecond)
+GAUGE_TICKS = 4             ; the gauge is shown for 0.75-1 s
 
 .segment "SCREEN"
+scr_marker: .res 16         ; Soft-70's text marker: directly before the buffer
 scr_buf: .res COLS*ROWS
 
 .bss
@@ -36,6 +45,11 @@ cursor_drawn: .res 1
 batch:       .res 1         ; nonzero between scr_batch_begin and scr_batch_end
 drawn_row:   .res 1
 drawn_col:   .res 1
+blink_phase: .res 1         ; 1 while the drawn cursor is in view, 0 while it blinks off
+blink_hold:  .res 1         ; 1: skip the next blink, so a cursor just shown stays a while
+gauge_ticks: .res 1         ; ticks until the gauge goes, or 0
+idle_cost:   .res 1
+budget:      .res 2         ; 8-cycle units until the next tick, less 1
 
 .data
 ; Called with the top line still in row 0, just before it scrolls off.
@@ -95,13 +109,19 @@ call_clear_span: jmp (drv_clear_span_vec)
 scr_exit:
         jmp (drv_exit_vec)
 
-; Shifts the Soft-70 window: A = 0 for the left columns, 1 for the right.
+; Shifts the Soft-70 window: A = 0 for the left columns, 1 for the right,
+; and shows the gauge.
 scr_hscroll:
         pha
         jsr cursor_hide
         pla
         jsr :+
-        jmp cursor_show
+        lda scr_driver
+        beq @show
+        jsr s70_gauge_on
+        lda #GAUGE_TICKS
+        sta gauge_ticks
+@show:  jmp cursor_show
 :       jmp (drv_hscroll_vec)
 
 ; ---------------------------------------------------------------------
@@ -124,10 +144,13 @@ scr_batch_end:
 cursor_hide:
         lda cursor_drawn
         beq :+
+        lda #0
+        sta cursor_drawn
+        lda blink_phase
+        beq :+              ; blinked off: nothing to take down
         ldx drawn_row
         ldy drawn_col
         lda #0
-        sta cursor_drawn
         jmp call_cursor
 :       rts
 
@@ -140,8 +163,66 @@ cursor_show:
         sty drawn_col
         lda #1
         sta cursor_drawn
+        sta blink_phase
+        sta blink_hold
         jmp call_cursor
 :       rts
+
+; ---------------------------------------------------------------------
+; time
+
+; Called by a loop that waits, on each pass, with A = how long a pass
+; takes, in units of 8 cycles; blinks Soft-70's cursor and takes its gauge
+; down when the time comes. Keeps X and Y.
+scr_idle:
+        sta idle_cost
+        lda scr_driver
+        beq @done           ; the VideoTerm keeps its own time
+        lda budget
+        sec
+        sbc idle_cost
+        sta budget
+        lda budget+1
+        sbc #0
+        sta budget+1
+        bpl @done
+        lda budget
+        clc
+        adc #<TICK
+        sta budget
+        lda budget+1
+        adc #>TICK
+        sta budget+1
+        txa
+        pha
+        tya
+        pha
+        jsr tick
+        pla
+        tay
+        pla
+        tax
+@done:  rts
+
+; Every 250 ms or so.
+tick:   lda gauge_ticks
+        beq @blink
+        dec gauge_ticks
+        bne @blink
+        jsr s70_gauge_off
+@blink: lda cursor_drawn
+        beq @done
+        lda blink_hold
+        beq :+
+        lda #0
+        sta blink_hold
+@done:  rts
+:       lda blink_phase
+        eor #1
+        sta blink_phase
+        ldx drawn_row
+        ldy drawn_col
+        jmp call_cursor     ; A = 1 shows it, 0 takes it down
 
 ; ---------------------------------------------------------------------
 ; output

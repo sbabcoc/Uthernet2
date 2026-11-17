@@ -146,10 +146,14 @@ class GopherTest {
             assertEquals("   2 A submenu", apple.row(2).stripTrailing());
             assertEquals("   3 Search the server", apple.row(3).stripTrailing());
             assertTrue(status(apple, "Item _"), apple.screen());
+            apple.runFor(300);
+            assertEquals(null, Soft70View.mismatch(apple, 0, -1, -1), "Soft-70 shows the menu: " + apple.screen());
 
             apple.type("1\r");
             apple.runUntil(() -> status(apple, "Page "), 20_000, "the text");
             assertEquals("About line 23", apple.row(22).stripTrailing(), "23 lines a page");
+            apple.runFor(300);
+            assertEquals(null, Soft70View.mismatch(apple, 0, -1, -1), "Soft-70 shows the text: " + apple.screen());
             apple.type(" ");
             apple.runUntil(() -> apple.row(0).startsWith("About line 24")
                 && status(apple, "Page 2"), 10_000, "page 2");
@@ -172,6 +176,8 @@ class GopherTest {
             apple.runUntil(() -> apple.screenContains("You searched for apple")
                 && status(apple, "Item _"), 20_000, "the search results");
             assertTrue(selectors.contains("/search\tapple"), "query sent after a tab: " + selectors);
+            apple.runFor(300);
+            assertEquals(null, Soft70View.mismatch(apple, 0, -1, -1), "Soft-70 shows the results: " + apple.screen());
 
             apple.type("q");
             apple.runUntil(() -> apple.exited, 10_000, "the program to quit");

@@ -17,7 +17,7 @@
 .import scr_clear_eol, scr_clear_bol, scr_clear_line, scr_clear_eos, scr_clear_bos
 .import scr_hscroll, scr_reverse_index, scr_row, scr_col, scr_put_dec
 .import scr_batch_begin, scr_batch_end, scr_redraw, scroll_hook, scr_put_num4
-.import scr_buf, scr_row_lo, scr_row_hi, beep
+.import scr_buf, scr_row_lo, scr_row_hi, beep, scr_idle
 .import sat_detect, sat_ok, sat_seek, sat_put, sat_get
 .import kbd_avail, kbd_get, line_input, net_start
 .import dns_set_hostname, dns_resolve, dns_ip
@@ -39,6 +39,7 @@ OPT_NAWS  = 31
 TX_SIZE   = 128
 SB_LINES  = 1024            ; scrollback lines, 80 bytes each, from the Saturn's byte 0
 SNAPSHOT  = SB_LINES * 80   ; the live screen, kept while scrollback is shown
+SESSION_PASS = 30           ; a quiet pass of the session loop: 236 cycles, in scr_idle's units (8 cycles)
 
 .segment "STARTUP"
         jmp main
@@ -172,6 +173,8 @@ quit:   jmp sys_exit
         jsr scr_puts
 
 session:
+        lda #SESSION_PASS
+        jsr scr_idle
         jsr ip65_process
         jsr tx_flush
         lda closed
