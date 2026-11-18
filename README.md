@@ -105,10 +105,12 @@ The utilities and their disk images are checked in, so that needs nothing
 else. Rebuilding them takes cc65, an IP65 checkout and AppleCommander; see
 `src/apple/Makefile`. `./gradlew screenshots -Proms=DIR` captures the
 screenshots in `docs/images` again, from the programs in
-`src/test/resources`, on the VideoTerm's 80-column screen. It connects to
-The Norse Wanderer BBS and `gopher.floodgap.com`, so it needs Internet
-access, and reads the VideoTerm's two ROM images from `DIR` -- the same
-files, by the same names, as ReplicApple2Plus's ROM folder holds.
+`src/test/resources`: on the VideoTerm's 80-column screen, and TELNET on
+Soft-70, drawn as ReplicApple2Plus draws hi-res on a green monochrome
+monitor (its `ScreenImage`). It connects to The Norse Wanderer BBS and
+`gopher.floodgap.com`, so it needs Internet access, and reads the
+VideoTerm's two ROM images from `DIR` -- the same files, by the same
+names, as ReplicApple2Plus's ROM folder holds.
 
 ## Verification
 

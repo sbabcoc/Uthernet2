@@ -1,5 +1,7 @@
 package com.nordstrom.uthernet.apple;
 
+import com.nordstrom.emulator.MonitorType;
+import com.nordstrom.emulator.ScreenImage;
 import com.nordstrom.emulator.expansion.VideoTerm;
 import com.nordstrom.emulator.expansion.VideoTermRenderer;
 import com.nordstrom.emulator.system.RomFiles;
@@ -13,6 +15,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -26,8 +29,11 @@ import java.util.Properties;
  * The Norse Wanderer BBS and Floodgap's Gopher server, with a VideoTerm in
  * slot 3, and draws its 80-column screen the way ReplicApple2Plus does: the
  * card model's own VideoTermRenderer, green on black, scaled to the
- * application's screen. Needs Internet access, and the VideoTerm's two ROM
- * images in the folder given as the second argument.
+ * application's screen. Then TELNET again without the card, on Soft-70,
+ * drawn as ReplicApple2Plus draws hi-res on a green monochrome monitor
+ * ({@link ScreenImage}): its left 70 columns, then its right 70 just after
+ * the pan, with the position gauge up. Needs Internet access, and the
+ * VideoTerm's two ROM images in the folder given as the second argument.
  * <p>
  * Arguments: the folder to write the images to, then the ROM folder.
  */
@@ -53,6 +59,7 @@ public final class Screenshots {
         RomFiles.setDirectory(Path.of(args[1]));
         telnet();
         gopher();
+        telnetSoft70();
     }
 
     // -----------------------------------------------------------------
@@ -78,6 +85,85 @@ public final class Screenshots {
         } finally {
             apple.close();
         }
+    }
+
+    // -----------------------------------------------------------------
+    // TELNET on Soft-70
+
+    private static void telnetSoft70() throws Exception {
+        AppleMachine apple = new AppleMachine(false, "telnet.bin");      // no VideoTerm: Soft-70
+        try {
+            apple.runUntil(() -> apple.screenContains("Connect to host"), 30_000, "the host prompt");
+            apple.type(BBS + "\r");
+            settle(apple, 90_000, "the BBS's first screen");
+            if (apple.screenContains("the connection failed.") || apple.screenContains("not found.")) {
+                throw new IllegalStateException("couldn't reach " + BBS + "; screen:\n" + apple.screen());
+            }
+            cursorOn(apple, 0);
+            saveSoft70(apple, "telnet-soft70.png");
+
+            apple.type("\u001b\u0015");                            // ESC, right arrow: columns 10-79
+            apple.runUntil(() -> gaugeUp(apple), 10_000, "the gauge, after the pan's redraw");
+            saveSoft70(apple, "telnet-soft70-right.png");
+
+            apple.type("\u001bq");
+            apple.runUntil(() -> apple.screenContains("Connection closed."), 20_000, "the disconnection");
+        } finally {
+            apple.close();
+        }
+    }
+
+    /**
+     * @return true if the gauge is on row 23's bottom scan line for the right 70 columns: every byte the row's
+     * own drawing EORed with the bar, but for the cursor's cell, which blinks
+     */
+    private static boolean gaugeUp(AppleMachine apple) {
+        try {
+            int[] bar = Soft70View.gaugeBar(10);
+            int matching = 0;
+            for (int b = 0; b < 40; b++) {
+                int drawn = Soft70View.drawnByte(apple, 10, Soft70View.GAUGE_ROW, Soft70View.GAUGE_LINE, b);
+                matching += apple.hiresByte(Soft70View.GAUGE_ROW, Soft70View.GAUGE_LINE, b) == (drawn ^ bar[b]) ? 1 : 0;
+            }
+            return matching >= 38;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * Runs until the blinking cursor is in its "on" phase, so the picture shows it: up to a second, a little
+     * more than a full blink, after which the cursor must be out of view.
+     */
+    private static void cursorOn(AppleMachine apple, int left) throws InterruptedException {
+        long until = System.currentTimeMillis() + 1_000;
+        while (System.currentTimeMillis() < until && !anyCellInverted(apple, left)) {
+            apple.runFor(20);
+        }
+    }
+
+    private static boolean anyCellInverted(AppleMachine apple, int left) {
+        try {
+            for (int row = 0; row < 24; row++) {
+                String text = apple.row(row);
+                for (int x = 0; x < 70; x++) {
+                    if (Soft70View.inverted(apple, row, x, text.charAt(left + x))) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static void saveSoft70(AppleMachine apple, String name) throws IOException {
+        if (apple.text || !apple.hires) {
+            throw new IllegalStateException("Soft-70 isn't showing; screen:\n" + apple.screen());
+        }
+        ScreenImage.write(ScreenImage.hiRes(apple, MonitorType.GREEN), new File(out, name).toPath());
+        System.out.println(name + "\n" + apple.screen());
     }
 
     // -----------------------------------------------------------------

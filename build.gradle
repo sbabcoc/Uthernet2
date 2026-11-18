@@ -125,8 +125,10 @@ test {
  * Captures the screenshots in docs/images: runs the utilities on the 6502,
  * connected to The Norse Wanderer BBS and gopher.floodgap.com (so it needs
  * Internet access), with a VideoTerm in slot 3, and draws its 80-column
- * screen with ReplicApple2Plus's VideoTerm renderer. The VideoTerm's ROM
- * images aren't distributed, so -Proms names the folder holding them:
+ * screen with ReplicApple2Plus's VideoTerm renderer; then TELNET without
+ * the card, on Soft-70, drawn on a green monochrome monitor with
+ * ReplicApple2Plus's ScreenImage. The VideoTerm's ROM images aren't
+ * distributed, so -Proms names the folder holding them:
  *
  *     ./gradlew screenshots -Proms=<ROM folder>
  */

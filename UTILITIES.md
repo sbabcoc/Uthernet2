@@ -58,13 +58,20 @@ Soft-70 is the display of [a2lib](https://github.com/sbabcoc/a2lib)'s
 Soft-70, with its font: characters 3 pixels wide, upper and lowercase,
 with descenders. It is drawn for a monochrome monitor, as hi-res text was
 in the period; on a colour monitor the text shows colour fringes. The
-cursor is the cell drawn in inverse, blinking about twice a second. After
-the left or right arrow, a bar along the bottom of the screen shows for
-about a second where the 70 columns are: dotted across the whole 80, solid
-over the 70 in view. ReplicApple2Plus's Copy Screen Text copies all 80
-columns of a Soft-70 screen, including those out of view (in ReplicApple2Plus
-releases after 1.9.0), through a marker the programs leave in memory for it, in
-the format a2lib documents (its DESIGN.md, section 3.9).
+cursor is the cell drawn in inverse, blinking about twice a second.
+
+![A BBS's menu on Soft-70, on a green monitor: its left 70 columns, the cursor after the prompt](docs/images/telnet-soft70.png)
+
+After the left or right arrow, a bar along the bottom of the screen shows
+for about a second where the 70 columns are: dotted across the whole 80,
+solid over the 70 in view.
+
+![The same menu just after ESC then the right arrow: its right 70 columns, and the bar, solid from the tenth column on](docs/images/telnet-soft70-right.png)
+
+ReplicApple2Plus's Copy Screen Text copies all 80 columns of a Soft-70
+screen, including those out of view (in ReplicApple2Plus 1.10.0 and
+later), through a marker the programs leave in memory for it, in the
+format a2lib documents (its DESIGN.md, section 3.9).
 
 The II+ keyboard types capitals only. With ReplicApple2Plus's shift-key
 mod on pushbutton 2, letters typed without Shift are lowercase. The II+
